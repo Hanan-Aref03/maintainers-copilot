@@ -216,3 +216,19 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+# Environment files
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Generated secret artifacts
+vault-token.json
+copilot-token.json
+
+# Python cache / local venvs
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
