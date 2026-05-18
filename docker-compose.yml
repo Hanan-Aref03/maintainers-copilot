@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   db:
     image: pgvector/pgvector:pg16
@@ -46,7 +44,7 @@ services:
       retries: 3
 
   vault:
-    image: vault:1.15
+    image: hashicorp/vault:1.15
     cap_add:
       - IPC_LOCK
     environment:
@@ -71,9 +69,7 @@ services:
       COLLECTOR_OTLP_ENABLED: "true"
 
   migrate:
-    build:
-      context: .
-      dockerfile: docker/api.Dockerfile
+    image: python:3.12-slim
     depends_on:
       db:
         condition: service_healthy
@@ -83,7 +79,7 @@ services:
       - DATABASE_URL=postgresql://copilot:${DB_PASSWORD:-changeme}@db:5432/maintainers
       - VAULT_ADDR=http://vault:8200
       - VAULT_TOKEN=${VAULT_TOKEN:-devroot}
-    command: alembic upgrade head
+    command: ["python", "-c", "print('migrations placeholder until Alembic is added')"]
     restart: "no"
 
   model-server:
@@ -102,7 +98,7 @@ services:
       minio:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8001/health\")'"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -135,7 +131,7 @@ services:
       migrate:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8000/health\")'"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -153,6 +149,11 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8501/health\")'"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
   widget:
     build:
@@ -161,17 +162,30 @@ services:
     ports:
       - "8080:80"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:80/health\")'"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
   host:
     build:
-      context: ./demo/host
-      dockerfile: ../../docker/host.Dockerfile
+      context: .
+      dockerfile: docker/host.Dockerfile
     ports:
       - "3000:80"
     depends_on:
-      - widget
-      - api
+      widget:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:80/health\")'"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
 volumes:
   pgdata:
