@@ -61,6 +61,20 @@ services:
     # Vault secrets are bootstrapped separately by scripts/vault-bootstrap.sh
     # or by your deployment pipeline. Compose only starts the Vault service.
 
+  pgadmin:
+    image: dpage/pgadmin4:8
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@copilot.local}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-pgadmin}
+      PGADMIN_CONFIG_SERVER_MODE: "True"
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      db:
+        condition: service_healthy
+
   jaeger:
     image: jaegertracing/all-in-one:1.55
     ports:
@@ -71,17 +85,14 @@ services:
       COLLECTOR_OTLP_ENABLED: "true"
 
   migrate:
-    image: python:3.12-slim
+    build:
+      context: .
+      dockerfile: docker/migrate.Dockerfile
     depends_on:
       db:
         condition: service_healthy
-      vault:
-        condition: service_healthy
     environment:
-      - DATABASE_URL=postgresql://copilot:${DB_PASSWORD:-changeme}@db:5432/maintainers
-      - VAULT_ADDR=http://vault:8200
-      - VAULT_TOKEN=${VAULT_TOKEN:-devroot}
-    command: ["python", "-c", "print('migrations placeholder until Alembic is added')"]
+      - DATABASE_URL=postgresql+psycopg2://copilot:${DB_PASSWORD:-changeme}@db:5432/maintainers
     restart: "no"
 
   model-server:
@@ -192,3 +203,4 @@ services:
 volumes:
   pgdata:
   minio_data:
+  pgadmin_data:
