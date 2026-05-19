@@ -1,8 +1,8 @@
 from sqlalchemy import Column, String, DateTime, JSON, Text, Enum, ForeignKey, Boolean, Integer
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
-from pgvector.sqlalchemy import Vector
 from app.infra.database import Base
+from app.infra.vector import Vector
 import uuid
 import enum
 
@@ -36,7 +36,7 @@ class LongTermMemory(Base):
     memory_type = Column(String)  # "semantic", "episodic", "procedural"
     content = Column(Text)
     embedding = Column(Vector(1536))  # for semantic search later
-    metadata = Column(JSON, default=dict)
+    metadata_ = Column("metadata", JSON, default=dict)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 class AuditLog(Base):

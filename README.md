@@ -22,6 +22,52 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
+## Database Workflow
+
+Run the migration container in a proper Alembic environment:
+
+```bash
+docker compose up -d db
+docker compose run --rm migrate
+```
+
+That container builds with `alembic`, `sqlalchemy`, `psycopg2-binary`, and `pgvector`, so the initial migration can create the `users`, `widgets`, `long_term_memory`, and `audit_logs` tables plus the `vector` extension.
+
+To inspect the schema in pgAdmin:
+
+```bash
+docker compose up -d pgadmin
+```
+
+Open `http://localhost:5050` and sign in with:
+
+- Email: `admin@example.com`
+- Password: `pgadmin123`
+
+Add a new server in pgAdmin with:
+
+- Name: `maintainers-db`
+- Host: `db`
+- Port: `5432`
+- Maintenance DB: `maintainers`
+- Username: `copilot`
+- Password: the value of `DB_PASSWORD` from `.env` or `changeme` if you kept the defaults
+
+After you connect, expand `Servers -> maintainers-db -> Databases -> maintainers -> Schemas -> public -> Tables` to see the tables.
+
+If you want the whole infra stack together, you can still use:
+
+```bash
+docker compose up -d db redis minio vault jaeger pgadmin migrate
+```
+
+`migrate` is a one-shot job, so it exits after applying the schema.
+
+If `docker compose run --rm migrate` fails with `password authentication failed for user "copilot"`, your existing `pgdata` volume was initialized with a different `DB_PASSWORD`. In that case, either:
+
+- wipe the local database volume and restart with `.env.example` values, or
+- change the `copilot` role password inside the running `db` container to match your current `DB_PASSWORD`
+
 ## Vault Bootstrap
 
 Vault secrets are not seeded from Compose.
