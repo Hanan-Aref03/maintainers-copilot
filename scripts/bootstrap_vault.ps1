@@ -1,13 +1,14 @@
 param(
-    [string]$VaultAddr = $env:VAULT_ADDR,
-    [string]$VaultToken = $env:VAULT_TOKEN,
-    [string]$VaultNamespace = $env:VAULT_NAMESPACE,
-    [string]$JwtSecret = $env:JWT_SECRET,
-    [string]$OpenAiApiKey = $env:OPENAI_API_KEY,
-    [string]$DbPassword = $env:DB_PASSWORD,
-    [string]$MinioRootUser = $env:MINIO_ROOT_USER,
-    [string]$MinioRootPassword = $env:MINIO_ROOT_PASSWORD,
-    [string]$GithubToken = $env:GITHUB_TOKEN,
+    [string]$VaultAddr,
+    [string]$VaultToken,
+    [string]$VaultNamespace,
+    [string]$JwtSecret,
+    [string]$GeminiApiKey,
+    [string]$VoyageApiKey,
+    [string]$DbPassword,
+    [string]$MinioRootUser,
+    [string]$MinioRootPassword,
+    [string]$GithubToken,
     [string]$PolicyName = "copilot",
     [string]$MountPath = "kv",
     [switch]$CreateToken,
@@ -18,17 +19,60 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-function Require-Value {
+function Import-DotEnv {
     param(
-        [string]$Name,
-        [string]$Value
+        [string]$Path
     )
 
-    if ([string]::IsNullOrWhiteSpace($Value)) {
-        throw "Set $Name before running this script."
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return
     }
 
-    return $Value
+    foreach ($line in Get-Content -LiteralPath $Path) {
+        $trimmed = $line.Trim()
+
+        if ([string]::IsNullOrWhiteSpace($trimmed) -or $trimmed.StartsWith('#')) {
+            continue
+        }
+
+        if ($trimmed -match '^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$') {
+            $key = $Matches[1]
+            $value = $Matches[2].Trim()
+
+            if (
+                ($value.StartsWith('"') -and $value.EndsWith('"')) -or
+                ($value.StartsWith("'") -and $value.EndsWith("'"))
+            ) {
+                $value = $value.Substring(1, $value.Length - 2)
+            }
+
+            if ([string]::IsNullOrWhiteSpace([System.Environment]::GetEnvironmentVariable($key))) {
+                Set-Item -Path "Env:$key" -Value $value
+            }
+        }
+    }
+}
+
+function Resolve-Value {
+    param(
+        [string]$Name,
+        [string]$Value,
+        [string]$Default = $null,
+        [string[]]$Aliases = @()
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($Value)) {
+        return $Value
+    }
+
+    foreach ($candidate in @($Name) + $Aliases) {
+        $candidateValue = [System.Environment]::GetEnvironmentVariable($candidate)
+        if (-not [string]::IsNullOrWhiteSpace($candidateValue)) {
+            return $candidateValue
+        }
+    }
+
+    return $Default
 }
 
 function Invoke-VaultApi {
@@ -55,14 +99,18 @@ function Invoke-VaultApi {
     Invoke-RestMethod @params
 }
 
-$VaultAddr = Require-Value -Name 'VAULT_ADDR' -Value $VaultAddr
-$VaultToken = Require-Value -Name 'VAULT_TOKEN' -Value $VaultToken
-$JwtSecret = Require-Value -Name 'JWT_SECRET' -Value $JwtSecret
-$OpenAiApiKey = Require-Value -Name 'OPENAI_API_KEY' -Value $OpenAiApiKey
-$DbPassword = Require-Value -Name 'DB_PASSWORD' -Value $DbPassword
-$MinioRootUser = Require-Value -Name 'MINIO_ROOT_USER' -Value $MinioRootUser
-$MinioRootPassword = Require-Value -Name 'MINIO_ROOT_PASSWORD' -Value $MinioRootPassword
-$GithubToken = Require-Value -Name 'GITHUB_TOKEN' -Value $GithubToken
+$repoRoot = Split-Path -Parent $PSScriptRoot
+Import-DotEnv -Path (Join-Path $repoRoot '.env')
+
+$VaultAddr = Resolve-Value -Name 'VAULT_ADDR' -Value $VaultAddr -Default 'http://localhost:8200'
+$VaultToken = Resolve-Value -Name 'VAULT_TOKEN' -Value $VaultToken -Default 'devroot'
+$JwtSecret = Resolve-Value -Name 'JWT_SECRET' -Value $JwtSecret
+$GeminiApiKey = Resolve-Value -Name 'GEMINI_API_KEY' -Value $GeminiApiKey -Aliases @('OPENAI_API_KEY')
+$VoyageApiKey = Resolve-Value -Name 'VOYAGE_API_KEY' -Value $VoyageApiKey
+$DbPassword = Resolve-Value -Name 'DB_PASSWORD' -Value $DbPassword
+$MinioRootUser = Resolve-Value -Name 'MINIO_ROOT_USER' -Value $MinioRootUser
+$MinioRootPassword = Resolve-Value -Name 'MINIO_ROOT_PASSWORD' -Value $MinioRootPassword
+$GithubToken = Resolve-Value -Name 'GITHUB_TOKEN' -Value $GithubToken
 
 $script:BaseUri = $VaultAddr.TrimEnd('/')
 $script:Headers = @{
@@ -88,6 +136,33 @@ while ($true) {
 
         Start-Sleep -Seconds $PollIntervalSeconds
     }
+}
+
+if ([string]::IsNullOrWhiteSpace($JwtSecret)) {
+    throw "Set JWT_SECRET before running this script."
+}
+
+if (
+    [string]::IsNullOrWhiteSpace($GeminiApiKey) -and
+    [string]::IsNullOrWhiteSpace($VoyageApiKey)
+) {
+    throw "Set GEMINI_API_KEY or VOYAGE_API_KEY before running this script. OPENAI_API_KEY is still accepted as a legacy alias for GEMINI_API_KEY."
+}
+
+if ([string]::IsNullOrWhiteSpace($DbPassword)) {
+    throw "Set DB_PASSWORD before running this script."
+}
+
+if ([string]::IsNullOrWhiteSpace($MinioRootUser)) {
+    throw "Set MINIO_ROOT_USER before running this script."
+}
+
+if ([string]::IsNullOrWhiteSpace($MinioRootPassword)) {
+    throw "Set MINIO_ROOT_PASSWORD before running this script."
+}
+
+if ([string]::IsNullOrWhiteSpace($GithubToken)) {
+    throw "Set GITHUB_TOKEN before running this script."
 }
 
 $mountPath = $MountPath.Trim('/')
@@ -116,15 +191,24 @@ if ($null -eq $mountProperty) {
     Write-Host "KV v2 already enabled at $mountName"
 }
 
+$secretData = @{
+    jwt_secret       = $JwtSecret
+    db_password      = $DbPassword
+    minio_access_key = $MinioRootUser
+    minio_secret_key = $MinioRootPassword
+    github_token     = $GithubToken
+}
+
+if (-not [string]::IsNullOrWhiteSpace($GeminiApiKey)) {
+    $secretData['gemini_api_key'] = $GeminiApiKey
+}
+
+if (-not [string]::IsNullOrWhiteSpace($VoyageApiKey)) {
+    $secretData['voyage_api_key'] = $VoyageApiKey
+}
+
 Invoke-VaultApi -Method POST -Path "/v1/$mountPath/data/copilot" -Body @{
-    data = @{
-        jwt_secret        = $JwtSecret
-        openai_api_key    = $OpenAiApiKey
-        db_password       = $DbPassword
-        minio_access_key  = $MinioRootUser
-        minio_secret_key  = $MinioRootPassword
-        github_token      = $GithubToken
-    }
+    data = $secretData
 } | Out-Null
 
 $policy = @"
