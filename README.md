@@ -53,6 +53,8 @@ Add a new server in pgAdmin with:
 - Username: `copilot`
 - Password: the value of `DB_PASSWORD` from `.env` or `changeme` if you kept the defaults
 
+Important: this password is for the Postgres server connection, not the pgAdmin login. If you change `DB_PASSWORD`, use the same new value here. If pgAdmin still says `password authentication failed for user "copilot"`, delete and re-add the server entry so it stops using any saved old password.
+
 After you connect, expand `Servers -> maintainers-db -> Databases -> maintainers -> Schemas -> public -> Tables` to see the tables.
 
 If you want the whole infra stack together, you can still use:
@@ -62,6 +64,8 @@ docker compose up -d db redis minio vault jaeger pgadmin migrate
 ```
 
 `migrate` is a one-shot job, so it exits after applying the schema.
+
+On Windows, Docker Desktop often occupies host port `8000`. This repo now exposes the API on `API_HOST_PORT` and defaults to `8010` so `uvicorn` and Compose can run without colliding with Docker's own backend service. If you want a different port, override `API_HOST_PORT` in `.env`.
 
 If `docker compose run --rm migrate` fails with `password authentication failed for user "copilot"`, your existing `pgdata` volume was initialized with a different `DB_PASSWORD`. In that case, either:
 
@@ -74,17 +78,18 @@ Vault secrets are not seeded from Compose.
 Run the bootstrap script separately against the target Vault endpoint:
 
 ```bash
-export VAULT_ADDR=http://localhost:8200
-export VAULT_TOKEN=devroot
-export JWT_SECRET=replace-with-a-real-secret
-export OPENAI_API_KEY=replace-with-a-real-openai-key
-export DB_PASSWORD=replace-with-a-real-db-password
-export MINIO_ROOT_USER=replace-with-a-real-minio-access-key
-export MINIO_ROOT_PASSWORD=replace-with-a-real-minio-secret-key
-export GITHUB_TOKEN=replace-with-a-real-github-token
-
 sh scripts/vault-bootstrap.sh
 ```
+
+The script loads the repo `.env` automatically, so with the local defaults you can usually run it without exporting anything first. If you want to override values, set them in your shell before running the script. The canonical API key variable is `GEMINI_API_KEY`; `VOYAGE_API_KEY` is accepted as a free fallback, and `OPENAI_API_KEY` is still accepted as a legacy alias for Gemini.
+
+Runtime defaults:
+
+- `GEMINI_MODEL=gemini-2.5-flash` for generation
+- `VOYAGE_EMBEDDING_MODEL=voyage-code-2` for retrieval embeddings
+- `API_HOST_PORT=8010` for the host-facing API port
+
+Gemini generates the chat response directly. Voyage powers the retrieval context that gets fed into Gemini and also provides a graceful memory-based fallback when Gemini is unavailable.
 
 For production, run that script from a secure admin environment or CI/CD job with access to the Vault cluster.
 
@@ -93,16 +98,7 @@ For production, run that script from a secure admin environment or CI/CD job wit
 If you are on Windows, use the PowerShell script instead of installing `vault.exe` or Chocolatey:
 
 ```powershell
-$env:VAULT_ADDR="http://localhost:8200"
-$env:VAULT_TOKEN="devroot"
-$env:JWT_SECRET="replace-with-a-real-secret"
-$env:OPENAI_API_KEY="replace-with-a-real-openai-key"
-$env:DB_PASSWORD="replace-with-a-real-db-password"
-$env:MINIO_ROOT_USER="replace-with-a-real-minio-access-key"
-$env:MINIO_ROOT_PASSWORD="replace-with-a-real-minio-secret-key"
-$env:GITHUB_TOKEN="replace-with-a-real-github-token"
-
 powershell -ExecutionPolicy Bypass -File scripts/bootstrap_vault.ps1
 ```
 
-The script uses Vault's HTTP API directly, so no local Vault CLI or package manager is required.
+The script loads the repo `.env` automatically, so with the local defaults you can usually run it directly. If you want to override values, set them in your shell before running the script. The canonical API key variable is `GEMINI_API_KEY`; `VOYAGE_API_KEY` is accepted as a free fallback, and `OPENAI_API_KEY` is still accepted as a legacy alias for Gemini. The script uses Vault's HTTP API directly, so no local Vault CLI or package manager is required.

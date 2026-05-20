@@ -1,5 +1,9 @@
-#Pydantic settings
+# Pydantic settings
+
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
+
+from app.infra.database import normalize_database_url
 
 class Settings(BaseSettings):
     # Vault will inject these, but we set defaults for local dev
@@ -11,10 +15,19 @@ class Settings(BaseSettings):
     model_server_url: str = "http://model-server:8001"
     otel_exporter_otlp_endpoint: str = "http://jaeger:4317"
     gemini_api_key: str = ""
+    voyage_api_key: str = ""
+    gemini_model: str = "gemini-2.5-flash"
+    voyage_embedding_model: str = "voyage-code-2"
+    provider_timeout_seconds: float = 30.0
     jwt_secret: str = "change-me"
 
     class Config:
         env_file = ".env"
         extra = "ignore"
+
+    @model_validator(mode="after")
+    def _normalize_database_url(self):
+        self.database_url = normalize_database_url(self.database_url)
+        return self
 
 settings = Settings()

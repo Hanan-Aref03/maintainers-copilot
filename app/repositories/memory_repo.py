@@ -12,7 +12,7 @@ class MemoryRepository:
             memory_type=memory_type,
             content=content,
             embedding=embedding,
-            metadata=metadata or {}
+            metadata_=metadata or {}
         )
         self.db.add(memory)
         self.db.commit()
