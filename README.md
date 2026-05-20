@@ -5,7 +5,7 @@ Authenticated chatbot for open-source maintainers - issue classification, entity
 ## Architecture
 
 - FastAPI backend with layered architecture (api -> service -> repository -> domain)
-- Model server (separate container) for classifier/NER/summarizer
+- Model server (separate container) for issue classification with Gemini-backed zero/few-shot and a rule fallback
 - Postgres + pgvector for long-term semantic memory
 - Redis for short-term conversation state
 - MinIO for model artifacts and eval reports
@@ -13,6 +13,17 @@ Authenticated chatbot for open-source maintainers - issue classification, entity
 - OpenTelemetry + Jaeger for tracing
 - Streamlit internal admin console
 - React widget (Vite) embeddable via one-line script
+
+## Model Server
+
+The `model-server` container now runs the FastAPI app in `model_server/app/main.py`.
+It exposes:
+
+- `GET /health`
+- `POST /classify`
+
+It reads `GEMINI_API_KEY` and `GEMINI_MODEL` from `.env` in local development or from Compose environment variables in Docker.
+The host port is configurable with `MODEL_SERVER_HOST_PORT` and defaults to `8011` so it avoids collisions on machines where `8001` is already taken.
 
 ## Quick Start
 

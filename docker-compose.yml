@@ -100,16 +100,10 @@ services:
       context: .
       dockerfile: docker/model_server.Dockerfile
     ports:
-      - "8001:8001"
+      - "${MODEL_SERVER_HOST_PORT:-8011}:8001"
     environment:
-      - VAULT_ADDR=http://vault:8200
-      - VAULT_TOKEN=${VAULT_TOKEN:-devroot}
-      - MINIO_ENDPOINT=minio:9000
-    depends_on:
-      vault:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
     healthcheck:
       test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8001/health\")'"]
       interval: 10s
