@@ -1,6 +1,6 @@
 from sqlalchemy import Column, String, DateTime, JSON, Text, Enum, ForeignKey, Boolean, Integer
 from sqlalchemy.dialects.postgresql import UUID
-from sqlalchemy.sql import func
+from sqlalchemy.sql import func, text
 from app.infra.database import Base
 from app.infra.vector import Vector
 import uuid
@@ -16,6 +16,7 @@ class User(Base):
     email = Column(String, unique=True, index=True)
     hashed_password = Column(String)
     role = Column(Enum(UserRole), default=UserRole.MAINTAINER)
+    token_version = Column(Integer, nullable=False, default=0, server_default=text("0"))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 class Widget(Base):
@@ -24,9 +25,12 @@ class Widget(Base):
     public_id = Column(String, unique=True, index=True)  # for the embed script
     owner_id = Column(UUID(as_uuid=True), ForeignKey("users.id"))
     allowed_origins = Column(JSON, default=list)  # ["https://example.com"]
-    theme = Column(JSON, default={"primary_color": "#3b82f6", "position": "bottom-right"})
+    theme = Column(
+        JSON,
+        default=lambda: {"primary_color": "#3b82f6", "position": "bottom-right"},
+    )
     greeting = Column(Text, default="Hi! How can I help with issue triage?")
-    enabled_tools = Column(JSON, default=["classify", "rag", "memory"])
+    enabled_tools = Column(JSON, default=lambda: ["classify", "rag", "memory"])
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 class LongTermMemory(Base):

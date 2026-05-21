@@ -8,7 +8,11 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.infra.ai_clients import GeminiClient, ProviderError, VoyageClient
+from app.infra.redaction import redact_text
+from app.infra.tracing import trace_span
+from app.infra.redis_client import ShortTermMemory
 from app.repositories.memory_repo import MemoryRepository
+from app.services.rag_service import retrieve_context
 
 
 class ChatService:
@@ -35,28 +39,88 @@ class ChatService:
         )
 
     async def process_message(self, user_id: UUID, thread_id: str, message: str) -> str:
+        result = await self.process_message_with_metadata(user_id, thread_id, message)
+        return str(result["response"])
+
+    async def process_message_with_metadata(
+        self,
+        user_id: UUID,
+        thread_id: str,
+        message: str,
+    ) -> dict[str, object]:
         cleaned_message = message.strip()
         if not cleaned_message:
-            return "Please send a non-empty message."
+            return {
+                "response": "Please send a non-empty message.",
+                "used_fallback": True,
+                "llm_provider": "local",
+                "retrieved_doc_ids": [],
+                "retrieved_contexts": [],
+                "memory_count": 0,
+                "conversation_count": 0,
+            }
 
-        query_embedding = await self._maybe_embed(cleaned_message)
-        memories = self._load_memories(user_id)
-        relevant_memories = self._rank_memories(memories, query_embedding)
-        context = self._format_memory_context(relevant_memories)
-        prompt = self._build_prompt(thread_id, cleaned_message, context)
+        with trace_span(
+            "chat.process_message",
+            {
+                "thread_id": thread_id,
+                "message_preview": redact_text(cleaned_message)[:200],
+                "user_id": str(user_id),
+            },
+        ):
+            query_embedding = await self._maybe_embed(cleaned_message)
+            short_term_messages = await self._load_short_term_messages(thread_id)
+            memories = self._load_memories(user_id)
+            retrieved_docs = await self._load_rag_context(cleaned_message)
+            relevant_memories = self._rank_memories(memories, query_embedding)
+            memory_context = self._format_memory_context(relevant_memories)
+            rag_context = self._format_rag_context(retrieved_docs)
+            conversation_context = self._format_short_term_context(short_term_messages)
+            prompt = self._build_prompt(
+                thread_id,
+                cleaned_message,
+                memory_context,
+                rag_context,
+                conversation_context,
+            )
 
-        provider = "local"
-        answer = self._build_fallback_reply(cleaned_message, context)
+            answer = self._build_fallback_reply(cleaned_message, memory_context, rag_context)
+            used_fallback = True
+            llm_provider = "local"
 
-        if self.gemini is not None:
-            try:
-                answer = await asyncio.to_thread(self.gemini.generate_text, prompt)
-                provider = "gemini"
-            except ProviderError:
-                provider = "voyage-fallback" if query_embedding is not None else "local-fallback"
+            if self.gemini is not None:
+                try:
+                    with trace_span(
+                        "llm.generate",
+                        {
+                            "provider": "gemini",
+                            "model": settings.gemini_model,
+                            "prompt_preview": redact_text(prompt)[:500],
+                        },
+                    ):
+                        answer = await asyncio.to_thread(self.gemini.generate_text, prompt)
+                        used_fallback = False
+                        llm_provider = "gemini"
+                except ProviderError:
+                    answer = self._build_fallback_reply(cleaned_message, memory_context, rag_context)
+                    used_fallback = True
+                    llm_provider = "local"
 
-        self._store_memory(user_id, thread_id, cleaned_message, answer, query_embedding, provider)
-        return answer
+            safe_answer = redact_text(answer)
+            await self._append_short_term_message(thread_id, "user", cleaned_message)
+            await self._append_short_term_message(thread_id, "assistant", safe_answer)
+            return {
+                "response": safe_answer,
+                "used_fallback": used_fallback,
+                "llm_provider": llm_provider,
+                "retrieved_doc_ids": [doc.get("id") for doc in retrieved_docs],
+                "retrieved_contexts": [
+                    f"{str(doc.get('title') or '').strip()}\n{str(doc.get('body') or '').strip()}".strip()
+                    for doc in retrieved_docs
+                ],
+                "memory_count": len(relevant_memories),
+                "conversation_count": len(short_term_messages),
+            }
 
     def _load_memories(self, user_id: UUID):
         if self.memory_repo is None:
@@ -71,9 +135,40 @@ class ChatService:
             return None
 
         try:
-            return await asyncio.to_thread(self.voyage.embed_text, message, "query")
+            with trace_span(
+                "embedding.query",
+                {
+                    "provider": "voyage",
+                    "model": settings.voyage_embedding_model,
+                    "input_preview": redact_text(message)[:240],
+                },
+            ):
+                return await asyncio.to_thread(self.voyage.embed_text, message, "query")
         except ProviderError:
             return None
+
+    async def _load_short_term_messages(self, thread_id: str):
+        try:
+            return await ShortTermMemory.load_conversation(thread_id)
+        except Exception:
+            return []
+
+    async def _append_short_term_message(self, thread_id: str, role: str, content: str) -> None:
+        try:
+            await ShortTermMemory.append_message(
+                thread_id,
+                role,
+                content,
+                ttl_seconds=settings.short_term_memory_ttl_seconds,
+            )
+        except Exception:
+            return
+
+    async def _load_rag_context(self, message: str):
+        try:
+            return await retrieve_context(message, top_k=3)
+        except Exception:
+            return []
 
     def _rank_memories(self, memories, query_embedding: list[float] | None):
         if not memories:
@@ -135,26 +230,66 @@ class ChatService:
             content = str(getattr(memory, "content", "")).strip()
             if not content:
                 continue
-            lines.append(f"- {content[:700]}")
+            lines.append(f"- {redact_text(content)[:700]}")
 
         return "\n".join(lines) if lines else "No prior memories."
 
-    def _build_prompt(self, thread_id: str, message: str, context: str) -> str:
+    def _format_rag_context(self, docs) -> str:
+        if not docs:
+            return "No retrieved issue context."
+
+        lines = []
+        for doc in docs:
+            title = redact_text(str(doc.get("title") or "")).strip()
+            body = redact_text(str(doc.get("body") or "")).strip()
+            if title:
+                lines.append(f"- {title}")
+            if body:
+                lines.append(f"  {body[:400]}")
+        return "\n".join(lines) if lines else "No retrieved issue context."
+
+    def _format_short_term_context(self, messages) -> str:
+        if not messages:
+            return "No recent conversation."
+
+        lines = []
+        for message in messages[-8:]:
+            role = str(message.get("role") or "user").strip()
+            content = str(message.get("content") or "").strip()
+            if content:
+                lines.append(f"{role}: {content[:500]}")
+
+        return "\n".join(lines) if lines else "No recent conversation."
+
+    def _build_prompt(
+        self,
+        thread_id: str,
+        message: str,
+        memory_context: str,
+        rag_context: str,
+        conversation_context: str,
+    ) -> str:
         return (
             "You are Maintainers Copilot, a concise assistant for open-source maintainers.\n"
             "Answer directly and practically.\n"
-            "Use the retrieved memory context when it is relevant.\n"
+            "Use the retrieved memory and issue context when it is relevant.\n"
+            "Use the recent conversation context when it is relevant.\n"
             "If the context is empty or unrelated, answer from first principles.\n\n"
             f"Thread ID: {thread_id}\n"
-            f"Relevant memory context:\n{context}\n\n"
+            f"Relevant memory context:\n{memory_context}\n\n"
+            f"Retrieved issue context:\n{rag_context}\n\n"
+            f"Recent conversation context:\n{conversation_context}\n\n"
             f"User message:\n{message}\n"
         )
 
-    def _build_fallback_reply(self, message: str, context: str) -> str:
-        if context and context != "No prior memories.":
+    def _build_fallback_reply(self, message: str, memory_context: str, rag_context: str) -> str:
+        if (memory_context and memory_context != "No prior memories.") or (
+            rag_context and rag_context != "No retrieved issue context."
+        ):
             return (
                 "Gemini is unavailable right now, so I am returning the best local memory-based fallback.\n\n"
-                f"Relevant context:\n{context}\n\n"
+                f"Relevant memory context:\n{memory_context}\n\n"
+                f"Retrieved issue context:\n{rag_context}\n\n"
                 f"Latest message:\n{message}"
             )
 
@@ -162,29 +297,3 @@ class ChatService:
             "Gemini is unavailable right now, and there is no stored context yet.\n"
             f"Latest message: {message}"
         )
-
-    def _store_memory(
-        self,
-        user_id: UUID,
-        thread_id: str,
-        message: str,
-        response: str,
-        embedding: list[float] | None,
-        provider: str,
-    ) -> None:
-        if self.memory_repo is None:
-            return
-
-        try:
-            self.memory_repo.create(
-                user_id=user_id,
-                memory_type="episodic",
-                content=f"Thread {thread_id}\nUser: {message}\nAssistant: {response}",
-                embedding=embedding,
-                metadata={
-                    "thread_id": thread_id,
-                    "provider": provider,
-                },
-            )
-        except SQLAlchemyError:
-            return

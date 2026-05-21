@@ -76,6 +76,12 @@ coverage.xml
 *.py.cover
 .hypothesis/
 .pytest_cache/
+.pytest-tmp/
+.tmp-tests/
+.local-tmp/
+artifacts/
+evals/*_report.json
+evals/eval_report.json
 cover/
 
 # Translations
@@ -259,3 +265,6 @@ __pycache__/
 .pytest_cache/
 .venv/
 venv/
+
+.docs/
+.planning/

@@ -1,8 +1,11 @@
+import logging
 import os
 import hvac
 import requests
 
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 class VaultClient:
     _client = None
@@ -32,18 +35,25 @@ class VaultClient:
                 os.environ[key.upper()] = str(value)
             return cls._secrets
         except Exception as e:
-            raise RuntimeError(f"Failed to load secrets from Vault: {e}")
+            cls._secrets = {}
+            logger.warning("Vault secrets unavailable: %s", e)
+            return cls._secrets
 
     @classmethod
     def get_secret(cls, key: str, default=None):
         if cls._secrets is None:
             cls.load_secrets()
-        return cls._secrets.get(key, default)
+        return cls._secrets.get(key, default) if cls._secrets else default
 
     @classmethod
     def get_gemini_api_key(cls):
-        return cls.get_secret("gemini_api_key") or cls.get_voyage_api_key()
+        return (
+            cls.get_secret("gemini_api_key")
+            or os.getenv("GEMINI_API_KEY")
+            or cls.get_voyage_api_key()
+            or os.getenv("VOYAGE_API_KEY")
+        )
 
     @classmethod
     def get_voyage_api_key(cls):
-        return cls.get_secret("voyage_api_key")
+        return cls.get_secret("voyage_api_key") or os.getenv("VOYAGE_API_KEY")

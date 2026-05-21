@@ -62,10 +62,15 @@ class GeminiClient:
         )
 
         candidates = response.get("candidates", [])
+        chunks: list[str] = []
         for candidate in candidates:
             content = candidate.get("content", {})
             parts = content.get("parts", [])
-            chunks = [part.get("text", "") for part in parts if part.get("text")]
+            for part in parts:
+                text = part.get("text")
+                if text:
+                    chunks.append(text)
+
         if chunks:
             return "".join(chunks).strip()
 

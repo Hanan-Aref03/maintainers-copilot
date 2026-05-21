@@ -11,9 +11,18 @@ async def chat(
     current_user=Depends(get_current_user),
     chat_service: ChatService = Depends(get_chat_service)
 ):
-    response = await chat_service.process_message(
+    if hasattr(chat_service, "process_message_with_metadata"):
+        response = await chat_service.process_message_with_metadata(
+            user_id=current_user.id,
+            thread_id=thread_id,
+            message=message,
+        )
+        if isinstance(response, dict) and "response" in response:
+            return response
+
+    response_text = await chat_service.process_message(
         user_id=current_user.id,
         thread_id=thread_id,
-        message=message
+        message=message,
     )
-    return {"response": response}
+    return {"response": response_text}

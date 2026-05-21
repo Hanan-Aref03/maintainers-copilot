@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD:-changeme}
       POSTGRES_DB: maintainers
     ports:
-      - "5432:5432"
+      - "${DB_HOST_PORT:-5433}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -96,8 +96,6 @@ services:
       - DATABASE_URL=postgresql://copilot:${DB_PASSWORD:-changeme}@db:5432/maintainers
       - VAULT_ADDR=http://vault:8200
       - VAULT_TOKEN=${VAULT_TOKEN:-devroot}
-    command: ["python", "-c", "print('migrations placeholder until Alembic is added')"]
-      - DATABASE_URL=postgresql+psycopg2://copilot:${DB_PASSWORD:-changeme}@db:5432/maintainers
     restart: "no"
 
   model-server:
@@ -156,13 +154,14 @@ services:
       - "8501:8501"
     environment:
       - API_URL=http://api:8000
+      - MODEL_SERVER_URL=http://model-server:8001
       - VAULT_ADDR=http://vault:8200
       - VAULT_TOKEN=${VAULT_TOKEN:-devroot}
     depends_on:
       api:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8501/health\")'"]
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8501/healthz\")'"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -177,7 +176,7 @@ services:
       api:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:80/health\")'"]
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:80/widget.js"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -194,7 +193,7 @@ services:
       api:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:80/health\")'"]
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:80/"]
       interval: 10s
       timeout: 5s
       retries: 3
