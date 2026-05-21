@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from app.repositories.memory_repo import MemoryRepository
 from app.repositories.audit_repo import AuditRepository
-from app.services.embedding_service import get_embedding  # we'll create embedding service
+from app.services.embedding_service import get_embedding
 from app.domain.models import LongTermMemory
 from uuid import UUID
 

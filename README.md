@@ -33,6 +33,13 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
+If you change the widget source under `widget/src/`, rebuild the embeddable bundle before serving `/widgets/widget.js`:
+
+```bash
+cd widget
+npm run build
+```
+
 ## Database Workflow
 
 Run the migration container in a proper Alembic environment:

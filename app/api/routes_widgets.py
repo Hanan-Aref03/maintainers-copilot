@@ -1,28 +1,37 @@
-from fastapi import APIRouter, Request, HTTPException
-from fastapi.responses import HTMLResponse
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import Response
+from sqlalchemy.orm import Session
+
+from app.api.dependencies import get_db
 from app.repositories.widget_repo import WidgetRepository
-from app.infra.database import SessionLocal
+
+WIDGET_BUNDLE_PATH = Path(__file__).resolve().parents[2] / "widget" / "dist" / "widget.js"
 
 router = APIRouter()
 
 @router.get("/widget.js")
-async def loader_script(request: Request, widget_id: str):
-    # Fetch widget config from DB
-    db = SessionLocal()
+async def loader_script(
+    request: Request,
+    widget_id: str,
+    db: Session = Depends(get_db),
+):
     repo = WidgetRepository(db)
     widget = repo.get_by_public_id(widget_id)
     if not widget:
         raise HTTPException(404, "Widget not found")
-    # Check origin
+
     origin = request.headers.get("origin")
-    if origin not in widget.allowed_origins:
+    allowed_origins = widget.allowed_origins or []
+    if origin and origin not in allowed_origins:
         raise HTTPException(403, "Origin not allowed")
-    # Serve the built widget script (read from file)
-    with open("widget/dist/widget.js", "r") as f:
-        script_content = f.read()
-    # Add CSP header for frame-ancestors
+
+    if not WIDGET_BUNDLE_PATH.exists():
+        raise HTTPException(503, "Widget bundle not built")
+
+    script_content = WIDGET_BUNDLE_PATH.read_text(encoding="utf-8")
     headers = {
-        "Content-Security-Policy": f"frame-ancestors {' '.join(widget.allowed_origins)}",
-        "Content-Type": "application/javascript"
+        "Content-Security-Policy": f"frame-ancestors {' '.join(allowed_origins)}",
     }
-    return HTMLResponse(content=script_content, headers=headers)
+    return Response(content=script_content, media_type="application/javascript", headers=headers)

@@ -96,8 +96,6 @@ services:
       - DATABASE_URL=postgresql://copilot:${DB_PASSWORD:-changeme}@db:5432/maintainers
       - VAULT_ADDR=http://vault:8200
       - VAULT_TOKEN=${VAULT_TOKEN:-devroot}
-    command: ["python", "-c", "print('migrations placeholder until Alembic is added')"]
-      - DATABASE_URL=postgresql+psycopg2://copilot:${DB_PASSWORD:-changeme}@db:5432/maintainers
     restart: "no"
 
   model-server:

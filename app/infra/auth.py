@@ -19,3 +19,8 @@ def decode_current_user(token: str) -> CurrentUser:
         return CurrentUser(id=UUID(cleaned_token))
     except (TypeError, ValueError):
         return build_dev_user()
+
+
+def current_user() -> CurrentUser:
+    """Backward-compatible dependency for older route imports."""
+    return build_dev_user()

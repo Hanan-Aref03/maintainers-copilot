@@ -77,3 +77,11 @@ def get_engine():
 @lru_cache(maxsize=1)
 def get_session_local():
     return sessionmaker(autocommit=False, autoflush=False, bind=get_engine())
+
+
+class _SessionLocalProxy:
+    def __call__(self):
+        return get_session_local()()
+
+
+SessionLocal = _SessionLocalProxy()

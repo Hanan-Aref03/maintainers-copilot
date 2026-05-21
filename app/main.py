@@ -1,5 +1,6 @@
 # FastAPI main application setup with routers and exception handlers (layered)
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import routes_auth, routes_chat, routes_widgets, routes_memory
 from app.core.config import settings
@@ -10,6 +11,21 @@ from app.infra.vault_client import VaultClient
 setup_tracing(app_name="copilot-api")
 
 app = FastAPI(title="Maintainer's Copilot")
+
+cors_allow_origins = [
+    origin.strip()
+    for origin in settings.cors_allow_origins.split(",")
+    if origin.strip()
+]
+
+if cors_allow_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=cors_allow_origins,
+        allow_credentials=False,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 
 @app.on_event("startup")

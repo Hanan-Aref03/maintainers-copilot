@@ -20,6 +20,16 @@ class Settings(BaseSettings):
     voyage_embedding_model: str = "voyage-code-2"
     provider_timeout_seconds: float = 30.0
     jwt_secret: str = "change-me"
+    cors_allow_origins: str = (
+        "http://localhost:3000,"
+        "http://localhost:5173,"
+        "http://localhost:8080,"
+        "http://localhost:8501,"
+        "http://127.0.0.1:3000,"
+        "http://127.0.0.1:5173,"
+        "http://127.0.0.1:8080,"
+        "http://127.0.0.1:8501"
+    )
 
     class Config:
         env_file = ".env"
