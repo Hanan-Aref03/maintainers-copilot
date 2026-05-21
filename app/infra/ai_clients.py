@@ -66,10 +66,46 @@ class GeminiClient:
             content = candidate.get("content", {})
             parts = content.get("parts", [])
             chunks = [part.get("text", "") for part in parts if part.get("text")]
-            if chunks:
-                return "".join(chunks).strip()
+        if chunks:
+            return "".join(chunks).strip()
 
         raise ProviderError("Gemini returned no text candidate")
+
+    def embed_text(
+        self,
+        text: str,
+        model: str = "gemini-embedding-2",
+        output_dimensionality: int | None = 1536,
+    ) -> list[float]:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:embedContent"
+        payload: dict[str, Any] = {
+            "content": {
+                "parts": [
+                    {
+                        "text": text,
+                    }
+                ]
+            },
+        }
+        if output_dimensionality is not None:
+            payload["output_dimensionality"] = output_dimensionality
+
+        response = _request_json(
+            url,
+            {
+                "Content-Type": "application/json",
+                "x-goog-api-key": self.api_key,
+            },
+            payload,
+            self.timeout_seconds,
+        )
+
+        embedding = response.get("embedding", {})
+        values = embedding.get("values")
+        if not isinstance(values, list) or not values:
+            raise ProviderError("Gemini returned no embedding values")
+
+        return [float(value) for value in values]
 
 
 @dataclass(slots=True)
