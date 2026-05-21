@@ -44,6 +44,8 @@ docker compose run --rm migrate
 
 That container builds with `alembic`, `sqlalchemy`, `psycopg2-binary`, and `pgvector`, so the initial migration can create the `users`, `widgets`, `long_term_memory`, and `audit_logs` tables plus the `vector` extension.
 
+Host-side tools like plain `alembic` or local Python scripts connect to the database container through `DB_HOST_PORT` instead of `5432`, so they do not collide with any Postgres service already running on your machine. The default is `5433`.
+
 To inspect the schema in pgAdmin:
 
 ```bash

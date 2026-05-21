@@ -9,6 +9,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 _DEFAULT_DATABASE_URL = "postgresql://copilot:changeme@db:5432/maintainers"
+_DEFAULT_DB_HOST_PORT = 5433
 
 
 def _running_in_docker() -> bool:
@@ -32,6 +33,19 @@ def _read_dotenv_value(name: str) -> str | None:
     return None
 
 
+def _resolve_db_host_port() -> int:
+    raw_value = os.getenv("DB_HOST_PORT") or _read_dotenv_value("DB_HOST_PORT")
+    if raw_value is None:
+        return _DEFAULT_DB_HOST_PORT
+
+    try:
+        port = int(raw_value)
+    except ValueError:
+        return _DEFAULT_DB_HOST_PORT
+
+    return port if 1 <= port <= 65535 else _DEFAULT_DB_HOST_PORT
+
+
 def normalize_database_url(url: str) -> str:
     """Rewrite Docker-only hostnames when running on the host machine."""
     try:
@@ -40,7 +54,7 @@ def normalize_database_url(url: str) -> str:
         return url
 
     if not _running_in_docker() and parsed.get_backend_name() == "postgresql" and parsed.host == "db":
-        parsed = parsed.set(host="127.0.0.1")
+        parsed = parsed.set(host="127.0.0.1", port=_resolve_db_host_port())
 
     return parsed.render_as_string(hide_password=False)
 
