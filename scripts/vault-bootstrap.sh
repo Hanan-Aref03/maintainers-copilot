@@ -37,8 +37,9 @@ else
   vault secrets enable -path=kv -version=2 kv
 fi
 
-set -- vault kv put kv/copilot \
+vault kv put kv/copilot \
   jwt_secret="$JWT_SECRET" \
+  openai_api_key="$OPENAI_API_KEY" \
   db_password="$DB_PASSWORD" \
   minio_access_key="$MINIO_ROOT_USER" \
   minio_secret_key="$MINIO_ROOT_PASSWORD" \
