@@ -1,0 +1,259 @@
+[
+  {
+    "id": 4225335006,
+    "title": "ENH: Add DataFrame.memory_report() for actionable dtype optimization suggestions",
+    "body": "<img width=\"827\" height=\"732\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/5670345d-6e44-4449-9cb1-5bb2357051a3\" />\n\n### Feature Type\n\n- [x] Adding new functionality to pandas\n\n- [ ] Changing existing functionality in pandas\n\n- [ ] Removing existing functionality in pandas\n\n\n### Problem Description\n\nDataFrame.memory_usage() tells you how much memory a DataFrame uses, but gives no\nguidance on why or what to do about it. Users who want to optimize memory must:\n\n- Manually inspect each column's dtype\n- Know the integer/float downcast rules by heart\n- Manually check cardinality for object columns\n- Write their own loops to apply changes\n\nThis is a very common pain point \u2014 especially for data engineers and analysts working\nwith medium-to-large datasets who hit memory pressure and have no built-in tool to\ndiagnose it.\n\n### Feature Description\n\nA new method DataFrame.memory_report() that:\n\n1. Analyzes every column's current dtype and actual value range\n2. Suggests the smallest ",
+    "true_label": "feature",
+    "raw_labels": [
+      "Enhancement",
+      "Closing Candidate",
+      "Describe/info/etc"
+    ]
+  },
+  {
+    "id": 4256707963,
+    "title": "API: Index.take discards fill_value and raises unnecessarily",
+    "body": "`Index.take` has two bugs when `allow_fill=True` and `fill_value` is passed explicitly:\n\n### 1. `fill_value` is silently discarded\n\nThe caller's `fill_value` is ignored; `self._na_value` is always substituted:\n\n```python\n# Note: we discard fill_value and use self._na_value, only relevant\n#  in the case where allow_fill is True and fill_value is not None\ntaken = algos.take(\n    values, indices, allow_fill=allow_fill, fill_value=self._na_value\n)\n```\n\n### 2. `_can_hold_na` gate raises on integer dtypes\n\n```python\n>>> pd.Index([1, 2, 3]).take([0, -1], allow_fill=True, fill_value=99)\nValueError: Unable to fill values because Index cannot contain NA\n```\n\nThe caller provided a valid fill value that the dtype can hold, but `Index.take` rejects it because `_can_hold_na` is False for integer dtypes.\n\n### Consequences\n\nThese force internal callers to bypass `Index.take` and work on the underlying arrays directly:\n\n- **`frame.py` idxmin/idxmax**: `algorithms.take(index._values, ...)` instead of `i",
+    "true_label": "bug",
+    "raw_labels": [
+      "Bug",
+      "Index"
+    ]
+  },
+  {
+    "id": 4192917932,
+    "title": "BUG: `na_rep=\"\"` in `DataFrame.to_csv` not applied consistently",
+    "body": "### Pandas version checks\n\n- [x] I have checked that this issue has not already been reported.\n\n- [x] I have confirmed this bug exists on the [latest version](https://pandas.pydata.org/docs/whatsnew/index.html) of pandas.\n\n- [x] I have confirmed this bug exists on the [main branch](https://pandas.pydata.org/docs/dev/getting_started/install.html#installing-the-development-version-of-pandas) of pandas.\n\n\n### Reproducible Example\n\n```python\nimport pandas as pd\n\npd.__version__\n# '3.1.0.dev0+575.ge3ae055ab2'\n\ndf = pd.DataFrame({\"a\": [1, 2, None, 3]}, index=[1, 2, 3, 4])\n\n# This works as expected\nprint(df.to_csv(na_rep=\"\"))\n# ,a\n# 1,1.0\n# 2,2.0\n# 3,\n# 4,3.0\n\n# na_rep is ignored if `index=False`\nprint(df.to_csv(na_rep=\"\", index=False))\n# a\n# 1.0\n# 2.0\n# \"\"\n# 3.0\n```\n\n### Issue Description\n\nWhen using `to_csv` with `index=False`, the `na_rep` argument gets ignored in the output, and instead NaNs are rendered as `\"\"`.\n\n### Expected Behavior\n\nExpect that `na_rep=\"\"` would work regardless of `ind",
+    "true_label": "bug",
+    "raw_labels": [
+      "Bug",
+      "Needs Triage"
+    ]
+  },
+  {
+    "id": 4194478248,
+    "title": "PERF: DataFrame row-wise .loc assignment is much slower with string_storage=\"pyarrow\" than \"python\"",
+    "body": "### Pandas version checks\n\n- [x] I have checked that this issue has not already been reported.\n\n- [x] I have confirmed this bug exists on the [latest version](https://pandas.pydata.org/docs/whatsnew/index.html) of pandas.\n\n- [] I have confirmed this bug exists on the [main branch](https://pandas.pydata.org/docs/dev/getting_started/install.html#installing-the-development-version-of-pandas) of pandas.\n\n\n### Reproducible Example\n\n```python\nimport time\n\nimport pandas as pd\nimport pyarrow as pa\n\n\ndef bench(storage: str, rows: int = 1000, cols: int = 20) -> float:\n    pd.options.mode.string_storage = storage\n\n    source = pd.DataFrame(\n        [[f\"v{j % 10}\" for j in range(cols)] for _ in range(rows)]\n    ).astype(str)\n    out = pd.DataFrame(columns=source.columns).astype(str)\n\n    start = time.perf_counter()\n    for i, row in enumerate(source.itertuples(index=False)):\n        out.loc[i] = row\n    return time.perf_counter() - start\n\n\nprint(f\"pandas={pd.__version__} pyarrow={pa.__version__}\")",
+    "true_label": "other",
+    "raw_labels": [
+      "Performance",
+      "Arrow",
+      "setitem-with-expansion"
+    ]
+  },
+  {
+    "id": 4264861734,
+    "title": "BUG: [REGRESSION] to_csv cannot handle FloatingArrays with np.nan, even with distinguish_nan_and_na=True",
+    "body": "### Pandas version checks\n\n- [x] I have checked that this issue has not already been reported.\n\n- [x] I have confirmed this bug exists on the [latest version](https://pandas.pydata.org/docs/whatsnew/index.html) of pandas.\n\n- [ ] I have confirmed this bug exists on the [main branch](https://pandas.pydata.org/docs/dev/getting_started/install.html#installing-the-development-version-of-pandas) of pandas.\n\n\n### Reproducible Example\n\n```python\nimport pandas as pd\n\ns = pd.Series((1, pd.NA, 0), index=[\"a\",\"b\",\"c\"], dtype=pd.Float64Dtype(), name=\"x\")\nwith pd.option_context(\"future.distinguish_nan_and_na\", True):\n    s = s/s # creates a series with both NA and NaN\n    print(s.to_csv(sep=\",\", mode=\"w\"))\n```\n\n### Issue Description\n\nThe above code raises the following error:\n```\nArrowTypeError: Expected bytes, got a 'numpy.float64' object\n```\n\nA similar code, worked as expected with Pandas<3 (i.e. `pandas=2.3.2`, with `PyArrow=21.0.0` just like for pandas3):\n```python\nimport pandas as pd\n\ns = pd.Se",
+    "true_label": "bug",
+    "raw_labels": [
+      "Bug",
+      "IO CSV",
+      "NA - MaskedArrays"
+    ]
+  },
+  {
+    "id": 4213690239,
+    "title": "BUG: `GroupBy.any()`/`all()` on NumPy `bool` columns return `NaN` for empty groups and upcast to `float64` instead of `bool`",
+    "body": "### Pandas version checks\n\n- [x] I have checked that this issue has not already been reported.\n\n- [x] I have confirmed this bug exists on the [latest version](https://pandas.pydata.org/docs/whatsnew/index.html) of pandas.\n\n- [x] I have confirmed this bug exists on the [main branch](https://pandas.pydata.org/docs/dev/getting_started/install.html#installing-the-development-version-of-pandas) of pandas.\n\n\n### Reproducible Example\n\n```python\nimport pandas as pd\nimport numpy as np\n\ndf = pd.DataFrame({\n    \"group\": pd.Categorical([\"A\", \"B\"], categories=[\"A\", \"B\", \"C\"]),\n    \"flag\": np.array([True, False], dtype=bool),\n})\n\nresult = df.groupby(\"group\", observed=False)[\"flag\"].any()\nprint(result)\n\n\n## Out\n\n\ngroup\nA    1.0\nB    0.0\nC    NaN\nName: flag, dtype: float64\n```\n\n### Issue Description\n\n`GroupBy.any()` and `GroupBy.all()` on NumPy `bool` columns return `float64` with `NaN` for empty groups instead of `bool` with `False`/`True`. This looks like a regression on current `main` introduced by",
+    "true_label": "bug",
+    "raw_labels": [
+      "Bug",
+      "Groupby",
+      "Categorical"
+    ]
+  },
+  {
+    "id": 4263477706,
+    "title": "BUG: 1-element pd.NA boolean arrays are all() but not any()",
+    "body": "### Pandas version checks\n\n- [x] I have checked that this issue has not already been reported.\n\n- [x] I have confirmed this bug exists on the [latest version](https://pandas.pydata.org/docs/whatsnew/index.html) of pandas.\n\n- [ ] I have confirmed this bug exists on the [main branch](https://pandas.pydata.org/docs/dev/getting_started/install.html#installing-the-development-version-of-pandas) of pandas.\n\n\n### Reproducible Example\n\n```python\nimport pandas as pd\ns1 = pd.Series({\"a\": pd.NA}, dtype=\"boolean\")\ns2 = pd.Series({\"a\": pd.NA, \"b\": False}, dtype=\"boolean\")\ns1.all(), s1.any(), s2.all(), s2.any()\n```\n\n### Issue Description\n\nFollowing #49828, I understand that `or`, `and` and `not` operators might not be correctly implemented for `pd.NA`. This, however, creates some funny behaviour when working with arrays of length 1 vs those of length >1.\n\nThe above examples outputs:\n`(np.True_, np.False_, np.False_, np.False_)`\n\n### Expected Behavior\n\n```\n>>> s1.all()\nnp.False_\n```\n\n### Installed Ve",
+    "true_label": "other",
+    "raw_labels": [
+      "Missing-data",
+      "Usage Question"
+    ]
+  },
+  {
+    "id": 4190095228,
+    "title": "DOC: Clarify Series index alignment in DataFrame.assign",
+    "body": "### Pandas version checks\n\n- [x] I have checked that the issue still exists on the latest versions of the docs on `main` [here](https://pandas.pydata.org/docs/dev/)\n\n\n### Location of the documentation\n\nhttps://pandas.pydata.org/docs/reference/api/pandas.DataFrame.assign.html\n\n### Documentation problem\n\nThe current `DataFrame.assign()` documentation states that non-callable values such as a Series, scalar, or array are \"simply assigned.\" However, it does not clearly explain that when a Series is passed, values are aligned by index labels rather than by position.\n\nThis behavior may be surprising to users, especially when compared to list or ndarray assignment, which is positional.\n\n### Suggested fix for documentation\n\nAdd a short clarification and example demonstrating that:\n\n- Series values are aligned by index labels\n- Missing labels result in NaN values\n- List/ndarray values are assigned positionally",
+    "true_label": "docs",
+    "raw_labels": [
+      "Docs",
+      "Needs Triage"
+    ]
+  },
+  {
+    "id": 4261193989,
+    "title": "BUG: `operation 'add' not supported for dtype 'string[pyarrow]' with dtype 'str'`",
+    "body": "### Pandas version checks\n\n- [x] I have checked that this issue has not already been reported.\n\n- [x] I have confirmed this bug exists on the [latest version](https://pandas.pydata.org/docs/whatsnew/index.html) of pandas.\n\n- [x] I have confirmed this bug exists on the [main branch](https://pandas.pydata.org/docs/dev/getting_started/install.html#installing-the-development-version-of-pandas) of pandas.\n\n\n### Reproducible Example\n\n```python\nimport pandas as pd\n\ndf = pd.DataFrame({'a': ['foo', 'bar']}).convert_dtypes(dtype_backend='pyarrow')\ndf['b'] = '!'\nprint(df.dtypes)\ndf['a'] + df['b']\n```\n\n### Issue Description\n\nThis raises\n```py\noperation 'add' not supported for dtype 'string[pyarrow]' with dtype 'str'\n```\n\n### Expected Behavior\n\n```\n0    foo!\n1    bar!\ndtype: str\n```\n\n### Installed Versions\n\n<details>\n\nINSTALLED VERSIONS\n------------------\ncommit                : b061a197f1d9b598b6852472a36ececac370d510\npython                : 3.12.5\npython-bits           : 64\nOS                    ",
+    "true_label": "bug",
+    "raw_labels": [
+      "Bug",
+      "Numeric Operations",
+      "Strings"
+    ]
+  },
+  {
+    "id": 4204959698,
+    "title": "DOC: Typo in the webpage docs/getting_started/intro_tutorials/09_timeseries.html",
+    "body": "### Pandas version checks\n\n- [x] I have checked that the issue still exists on the latest versions of the docs on `main` [here](https://pandas.pydata.org/docs/dev/)\n\n\n### Location of the documentation\n\n1. https://pandas.pydata.org/docs/getting_started/intro_tutorials/09_timeseries.html\n2. https://pandas.pydata.org/docs/dev/getting_started/intro_tutorials/09_timeseries.html#min-tut-09-timeseries\n\n\n### Documentation problem\n\nTypo: As shown in the red rectangles. It should be \"us\" instead of \"ns\". \n\n<img width=\"1322\" height=\"1079\" alt=\"Image\" src=\"https://github.com/user-attachments/assets/f64da97f-7938-4d9d-9d02-1001d15a2de8\" />\n\n### Suggested fix for documentation\n\nJust modified the typo.",
+    "true_label": "docs",
+    "raw_labels": [
+      "Docs",
+      "Needs Triage"
+    ]
+  },
+  {
+    "id": 4235362506,
+    "title": "BUG: `groupby(..., as_index=False)[col].ohlc()` returns group keys in the index",
+    "body": "### Pandas version checks\n\n- [x] I have checked that this issue has not already been reported.\n\n- [x] I have confirmed this bug exists on the [latest version](https://pandas.pydata.org/docs/whatsnew/index.html) of pandas.\n\n- [x] I have confirmed this bug exists on the [main branch](https://pandas.pydata.org/docs/dev/getting_started/install.html#installing-the-development-version-of-pandas) of pandas.\n\n\n### Reproducible Example\n\n``` python\nimport pandas as pd\n\ndf = pd.DataFrame({\n    \"key\": [\"A\", \"A\", \"B\", \"B\"],\n    \"price\": [1.0, 2.0, 3.0, 4.0],\n})\n\nresult = df.groupby(\"key\", as_index=False)[\"price\"].ohlc()\n\nprint(result)\nprint()\nprint(\"Index:\", result.index.tolist())\nprint(\"Columns:\", result.columns.tolist())\n```\n\n### Issue Description\n\n`df.groupby(\"key\", as_index=False)[\"col\"].ohlc()` ignores `as_index=False`: the group key is returned in the index instead of as a column. Other aggregations such as `sum`, `mean`, `min`, and `max` correctly honor `as_index=False`.\n\n### Expected Behavi",
+    "true_label": "bug",
+    "raw_labels": [
+      "Bug",
+      "Groupby"
+    ]
+  },
+  {
+    "id": 4385963314,
+    "title": "DOC: Missing docstring for enable_data_resource_formatter in printing module",
+    "body": "### Pandas version checks\n\n- [x] I have checked that the issue still exists on the latest versions of the docs on `main` [here](https://pandas.pydata.org/docs/dev/)\n\n\n### Location of the documentation\n\npandas/io/formats/printing.py\n\n### Documentation problem\n\nThe function `enable_data_resource_formatter` in `pandas/io/formats/printing.py` does not have a docstring describing its purpose or behavior. \n\nThis function performs non-trivial logic, including:\n- Detecting whether the code is running in an IPython environment\n- Dynamically registering a formatter for the `application/vnd.dataresource+json` mimetype\n- Enabling or disabling that  formatter based on the 'enable' parameter\n\nWithout documentation, it is unclear:\n- What this formatter is used for\n- When this function should be called\n\nThis makes the function difficult to understand and maintain for contributors. \n\n### Suggested fix for documentation\n\nThe current implementation currently has no docstring, so developers must read and ",
+    "true_label": "docs",
+    "raw_labels": [
+      "Docs",
+      "Needs Discussion",
+      "Closing Candidate"
+    ]
+  },
+  {
+    "id": 4299890429,
+    "title": "BUG: DataFrame/Series.rename silently downcasts nullable index/column dtypes to NumPy dtypes",
+    "body": "### Pandas version checks\n\n- [x] I have checked that this issue has not already been reported.\n\n- [x] I have confirmed this bug exists on the [latest version](https://pandas.pydata.org/docs/whatsnew/index.html) of pandas.\n\n- [x] I have confirmed this bug exists on the [main branch](https://pandas.pydata.org/docs/dev/getting_started/install.html#installing-the-development-version-of-pandas) of pandas.\n\n\n### Reproducible Example\n\n```python\nimport pandas as pd\n\ndf = pd.DataFrame(\n      {\"val\": [1, 2, 3]},\n      index=pd.Index(pd.array([1, 2, 3], dtype=\"Int64\"), name=\"id\"),\n  )\nprint(df.index.dtype)\nprint(df.rename({1: 9}).index.dtype)\n```\n\n### Issue Description\n\n`DataFrame.rename()` and `Series.rename()` do not preserve nullable extension dtypes on index/column labels. In the reproduced cases with nullable integer and floating dtypes, renaming labels silently downcasts the result to the corresponding NumPy dtype.\n\nThe root cause appears to be `Index._transform_index()`, which reconstructs",
+    "true_label": "bug",
+    "raw_labels": [
+      "Bug",
+      "ExtensionArray",
+      "Index"
+    ]
+  },
+  {
+    "id": 4242055305,
+    "title": "PERF: Specify `how` when calling `merge._factorize_keys` when possible",
+    "body": "Ref: https://github.com/pandas-dev/pandas/pull/64691#discussion_r3067005532\n\nIn addition to the two methods identified in the above comment, other calls should be investigated as well.",
+    "true_label": "other",
+    "raw_labels": [
+      "Performance",
+      "Reshaping"
+    ]
+  },
+  {
+    "id": 4258548072,
+    "title": "BUG: `DataFrame.agg([...], numeric_only=True)` returns `NaN` for non-numeric columns instead of excluding them",
+    "body": "### Pandas version checks\n\n- [x] I have checked that this issue has not already been reported.\n\n- [x] I have confirmed this bug exists on the [latest version](https://pandas.pydata.org/docs/whatsnew/index.html) of pandas.\n\n- [x] I have confirmed this bug exists on the [main branch](https://pandas.pydata.org/docs/dev/getting_started/install.html#installing-the-development-version-of-pandas) of pandas.\n\n\n### Reproducible Example\n\n```python\nimport pandas as pd\n\ndf = pd.DataFrame({\n      \"A\": [1, 2, 3],\n      \"B\": [1.0, 2.0, 3.0],\n      \"C\": [\"foo\", \"bar\", \"baz\"], })\n\nresult = df.agg([\"sum\", \"mean\"], numeric_only=True)\nprint(result)\n```\n\n### Issue Description\n\n`DataFrame.agg([...], numeric_only=True)` returns `NaN` for non-numeric columns instead of excluding them. This affects `DataFrame.agg` with a list of string reduction names and `numeric_only=True`, including reductions such as `sum`, `mean`, `std`, `var`, `sem`, `median`, `prod`, `min`, and `max`, on DataFrames with non-numeric colu",
+    "true_label": "bug",
+    "raw_labels": [
+      "Bug",
+      "Apply"
+    ]
+  },
+  {
+    "id": 4376965251,
+    "title": "DEP: update of fsspec 2026.4 broke compressed csv reading",
+    "body": "From https://github.com/pandas-dev/pandas/pull/65433, the update of fsspec from 2026.2.0 to 2026.4 caused some tests to fail (that PR added a temporary upper pin).\n\nFrom looking at the PRs included in that release, this is likely caused by https://github.com/fsspec/filesystem_spec/pull/2012\n\nExample failure (https://github.com/pandas-dev/pandas/actions/runs/25182285458/job/73830335550):\n\n```\nFAILED pandas/tests/io/test_common.py::test_read_csv_chained_url_no_error[None] - ValueError: seek of closed file\nFAILED pandas/tests/io/test_common.py::test_read_csv_chained_url_no_error[infer] - ValueError: seek of closed file\n```\n\n```\n\n__________________ test_read_csv_chained_url_no_error[infer] ___________________\n[gw2] linux -- Python 3.14.4 /home/runner/work/pandas/pandas/.pixi/envs/py314/bin/python\n\ndatapath = <function datapath.<locals>.deco at 0x7f208c290050>\ncompression = 'infer'\n\n    @td.skip_if_no(\"fsspec\")\n    @pytest.mark.parametrize(\"compression\", [None, \"infer\"])\n    def test_read_c",
+    "true_label": "other",
+    "raw_labels": [
+      "IO CSV",
+      "Dependencies"
+    ]
+  },
+  {
+    "id": 4409913376,
+    "title": "BUG:  `groupby` cumprod/cummin/cummax returns `Float64` for nullable integers when group key contains `NA`",
+    "body": "### Pandas version checks\n\n- [x] I have checked that this issue has not already been reported.\n\n- [x] I have confirmed this bug exists on the [latest version](https://pandas.pydata.org/docs/whatsnew/index.html) of pandas.\n\n- [x] I have confirmed this bug exists on the [main branch](https://pandas.pydata.org/docs/dev/getting_started/install.html#installing-the-development-version-of-pandas) of pandas.\n\n\n### Reproducible Example\n\n```python\nimport pandas as pd\n\ndf = pd.DataFrame({\n      \"key\": [\"a\", None, \"a\"],\n      \"val\": pd.array([2, 3, 4], dtype=\"Int64\"),\n})\n\ng = df.groupby(\"key\")\n\nprint(g[\"val\"].cumsum().dtype)   # Int64   (correct)\nprint(g[\"val\"].cumprod().dtype)  # Float64 (expected Int64)\nprint(g[\"val\"].cummin().dtype)   # Float64 (expected Int64)\nprint(g[\"val\"].cummax().dtype)   # Float64 (expected Int64)\n```\n\n### Issue Description\n\n`groupby().cumprod()`, `groupby().cummin()`, and `groupby().cummax()` return `Float64` instead of preserving the nullable integer dtype, e.g. `Int64`",
+    "true_label": "bug",
+    "raw_labels": [
+      "Bug",
+      "Groupby",
+      "Dtype Conversions",
+      "NA - MaskedArrays",
+      "Transformations"
+    ]
+  },
+  {
+    "id": 4186484781,
+    "title": "BUG: read_parquet fails with tz aware data",
+    "body": "### Pandas version checks\n\n- [x] I have checked that this issue has not already been reported.\n\n- [x] I have confirmed this bug exists on the [latest version](https://pandas.pydata.org/docs/whatsnew/index.html) of pandas.\n\n- [x] I have confirmed this bug exists on the [main branch](https://pandas.pydata.org/docs/dev/getting_started/install.html#installing-the-development-version-of-pandas) of pandas.\n\n\n### Reproducible Example\n\n```python\nimport pandas as pd\n\n# Create datetime ranges\ndate_range_naive = pd.date_range(start='2024-01-01', periods=5, freq='D')\ndate_range_aware = pd.date_range(start='2024-01-01', periods=5, freq='D', tz='Europe/Berlin')\n\n# Create DataFrames\ndf_naive = pd.DataFrame({\n    'value': range(5)\n}, index=date_range_naive)\n\ndf_aware = pd.DataFrame({\n    'value': range(5, 10)\n}, index=date_range_aware)\n\n\ndf_naive.to_parquet('df_naive.parquet')\ndf_aware.to_parquet('df_aware.parquet')\n\n# Read DataFrames back from Parquet files\ndf_naive_read = pd.read_parquet('df_naive.p",
+    "true_label": "bug",
+    "raw_labels": [
+      "Bug",
+      "Timezones",
+      "IO Parquet"
+    ]
+  },
+  {
+    "id": 4323799291,
+    "title": "ENH: Introduce SECURITY.md",
+    "body": "See the GitHub doc for details. Part of the GitHub Secure Open Source Fund\nProject.\n\nhttps://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/configure-vulnerability-reporting/adding-a-security-policy-to-your-repository",
+    "true_label": "feature",
+    "raw_labels": [
+      "Enhancement",
+      "CI"
+    ]
+  },
+  {
+    "id": 4309613683,
+    "title": "BUG: Series.combine_first fails when names are of type Timestamp",
+    "body": "### Pandas version checks\n\n- [x] I have checked that this issue has not already been reported.\n\n- [x] I have confirmed this bug exists on the [latest version](https://pandas.pydata.org/docs/whatsnew/index.html) of pandas.\n\n- [x] I have confirmed this bug exists on the [main branch](https://pandas.pydata.org/docs/dev/getting_started/install.html#installing-the-development-version-of-pandas) of pandas.\n\n\n### Reproducible Example\n\n```python\nimport pandas as pd\n\ns1 = pd.Series([0], name=pd.to_datetime('2026'))\ns2 = pd.Series([1,2], name=pd.to_datetime('2027'))\ns3 = pd.Series([1,3], name=pd.to_datetime('2025'))\n\nprint(s1.combine_first(s2))\nprint(s1.combine_first(s3))\n```\n\n### Issue Description\n\n`s1.combine_first(s3)` fails because `s3.name` is a datetime anterior to `s1.name`.\n\nERROR :\n\n> Traceback (most recent call last):\n>     print(s1.combine_first(s3))\n>           ~~~~~~~~~~~~~~~~^^^^\n>   File \".venv\\Lib\\site-packages\\pandas\\core\\series.py\", line 3441, in combine_first\n>     combined = ",
+    "true_label": "bug",
+    "raw_labels": [
+      "Bug",
+      "Timestamp",
+      "combine/combine_first/update"
+    ]
+  },
+  {
+    "id": 4403014478,
+    "title": "BUG: Conversion from np.ma.masked_array to pd.array does not preserve missing values",
+    "body": "### Pandas version checks\n\n- [x] I have checked that this issue has not already been reported.\n\n- [x] I have confirmed this bug exists on the [latest version](https://pandas.pydata.org/docs/whatsnew/index.html) of pandas.\n\n- [x] I have confirmed this bug exists on the [main branch](https://pandas.pydata.org/docs/dev/getting_started/install.html#installing-the-development-version-of-pandas) of pandas.\n\n\n### Reproducible Example\n\n```python\nimport numpy as np\nimport pandas as pd\n\na = np.ma.array([1, 2, 3, 4], mask=[False, True, False, True])\n\n# BUG: mask is ignored completely\npd.array(a)\n# Output:\n# <IntegerArray>\n# [1, 2, 3, 4]\n# Length: 4, dtype: Int64\n\n# For comparison, pd.Series handles the mask but changes dtype to float\npd.Series(a)\n# Output:\n# 0 1.0\n# 1 NaN\n# 2 3.0\n# 3 NaN\n# dtype: float64\n```\n\n### Issue Description\n\nNumPy [masked arrays](https://numpy.org/doc/stable/reference/maskedarray.generic.html#what-is-a-masked-array) are used to define arrays with missing values, similar to",
+    "true_label": "bug",
+    "raw_labels": [
+      "Bug",
+      "Duplicate Report"
+    ]
+  },
+  {
+    "id": 4263954687,
+    "title": "CI regression: Doc Build and pre-commit jobs failing across multiple PRs",
+    "body": "### Describe the bug\n\nThe following CI jobs are failing across multiple unrelated PRs:\n\n- Doc Build and Upload\n- Code Checks / Docstring validation, typing, and other manual pre-commit hooks\n\nFailures appear unrelated to PR contents and occur during environment setup/build.\n\n---\n\n### Evidence\n\nObserved failures on:\n\n- https://github.com/pandas-dev/pandas/pull/65212\n- https://github.com/pandas-dev/pandas/pull/65224\n- https://github.com/pandas-dev/pandas/pull/65225\n\nAll show failures in:\n\n- Doc Build and Upload\n- Docstring validation, typing, and other manual pre-commit hooks\n\n---\n\n### Error message\n\nFrom the Doc Build job:\n\n../../meson.build:2:0: ERROR: Compiler cython cannot compile programs.\n\nThis occurs during the Meson sanity check before pandas builds.\n\n---\n\n### Expected behavior\n\nCI jobs should pass for unrelated PRs unless affected by code changes.\n\n---\n\n### Additional context\n\nSince the same checks are failing across multiple unrelated PRs,\nthis appears to be a CI environment re",
+    "true_label": "other",
+    "raw_labels": []
+  },
+  {
+    "id": 4257146085,
+    "title": "BUILD: meson.build fails in Pandas 2.3.1 as of earlier today due to meson 1.11 update",
+    "body": "### Installation check\n\n- [x] I have read the [installation guide](https://pandas.pydata.org/pandas-docs/stable/getting_started/install.html#installing-pandas).\n\n\n### Platform\n\nLinux-5.15.0-1084-aws-x86_64-with-glibc2.31\n\n### Installation Method\n\npip install\n\n### pandas Version\n\n2.3.1\n\n### Python Version\n\ncpython 3.14.3\n\n### Installation Logs\n\n<details>\n\n../pandas/_libs/tslibs/meson.build:32:7: ERROR: python.extension_module keyword argument 'dependencies' was of type array[str] but should have been array[Dependency | InternalDependency]\n\n</details>\n",
+    "true_label": "other",
+    "raw_labels": [
+      "Build"
+    ]
+  },
+  {
+    "id": 4332953561,
+    "title": "BUG:  Index `&` operator performs bitwise AND instead of set intersection for int64 dtype in v2.2.3",
+    "body": "### Pandas version checks\n\n- [x] I have checked that this issue has not already been reported.\n\n- [x] I have confirmed this bug exists on the [latest version](https://pandas.pydata.org/docs/whatsnew/index.html) of pandas.\n\n- [x] I have confirmed this bug exists on the [main branch](https://pandas.pydata.org/docs/dev/getting_started/install.html#installing-the-development-version-of-pandas) of pandas.\n\n\n### Reproducible Example\n\n```python\n### Pandas Version\n2.2.3\n\n### Python Version\n3.12 (\u8bf7\u66ff\u6362\u6210\u4f60\u7684\u5b9e\u9645\u7248\u672c)\n\n### Operating System\nWindows\n\n### Description\nWhen using the `&` operator on two `pd.Index` objects containing integers, the operation returns the NumPy bitwise AND result instead of the set intersection.\nThe `.intersection()` method works as expected, confirming that the `&` operator is broken.\n\n### Reproducible Code\n\nimport pandas as pd\nindA = pd.Index([1, 3, 5, 7, 9])\nindB = pd.Index([2, 3, 5, 7, 11])\nprint(indA & indB)\n```\n\n### Issue Description\n\n### Pandas Version\n2.2.3\n\n### Python Ve",
+    "true_label": "other",
+    "raw_labels": [
+      "Usage Question"
+    ]
+  },
+  {
+    "id": 4321777112,
+    "title": "BUG: df.query() returning an empty dataframe on this condition - col1 in (col2, col3)",
+    "body": "### Pandas version checks\n\n- [x] I have checked that this issue has not already been reported.\n\n- [x] I have confirmed this bug exists on the [latest version](https://pandas.pydata.org/docs/whatsnew/index.html) of pandas.\n\n- [ ] I have confirmed this bug exists on the [main branch](https://pandas.pydata.org/docs/dev/getting_started/install.html#installing-the-development-version-of-pandas) of pandas.\n\n\n### Reproducible Example\n\n```python\nimport pandas as pd\n\ndf = pd.DataFrame({'a': [1, 2, 3], 'b': [1, 4, 9], 'c': [1, 8, 27]})\n\n# Scenario 1\nprint(df.query('b <= a <= c'))\n# Returns the first row (Expected)\n\n# Scenario 2\nprint(df.query('b + 1 <= a <= c'))\n# Returns an empty dataframe (Expected)\n\n# Scenario 3\nprint(df.query('b in (a, c)'))\n# Returns an empty dataframe (Shouldn't this also return the first row)\n\ndf = pd.DataFrame({'a': ['a', 'a', 'b'], 'b': ['a', 'b', 'c'], 'c': ['b', 'b', 'c']})\n\n# Scenario 4\nprint(df.query('b in (a, c)'))\n# ArrowInvalid error\n```\n\n### Issue Description\n\nM",
+    "true_label": "bug",
+    "raw_labels": [
+      "Bug",
+      "expressions"
+    ]
+  }
+]

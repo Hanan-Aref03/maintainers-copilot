@@ -61,6 +61,20 @@ services:
     # Vault secrets are bootstrapped separately by scripts/vault-bootstrap.sh
     # or by your deployment pipeline. Compose only starts the Vault service.
 
+  pgadmin:
+    image: dpage/pgadmin4:8
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@copilot.local}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-pgadmin}
+      PGADMIN_CONFIG_SERVER_MODE: "True"
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      db:
+        condition: service_healthy
+
   jaeger:
     image: jaegertracing/all-in-one:1.55
     ports:
@@ -72,16 +86,18 @@ services:
 
   migrate:
     image: python:3.12-slim
+    build:
+      context: .
+      dockerfile: docker/migrate.Dockerfile
     depends_on:
       db:
-        condition: service_healthy
-      vault:
         condition: service_healthy
     environment:
       - DATABASE_URL=postgresql://copilot:${DB_PASSWORD:-changeme}@db:5432/maintainers
       - VAULT_ADDR=http://vault:8200
       - VAULT_TOKEN=${VAULT_TOKEN:-devroot}
     command: ["python", "-c", "print('migrations placeholder until Alembic is added')"]
+      - DATABASE_URL=postgresql+psycopg2://copilot:${DB_PASSWORD:-changeme}@db:5432/maintainers
     restart: "no"
 
   model-server:
@@ -89,16 +105,10 @@ services:
       context: .
       dockerfile: docker/model_server.Dockerfile
     ports:
-      - "8001:8001"
+      - "${MODEL_SERVER_HOST_PORT:-8011}:8001"
     environment:
-      - VAULT_ADDR=http://vault:8200
-      - VAULT_TOKEN=${VAULT_TOKEN:-devroot}
-      - MINIO_ENDPOINT=minio:9000
-    depends_on:
-      vault:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
     healthcheck:
       test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8001/health\")'"]
       interval: 10s
@@ -110,7 +120,7 @@ services:
       context: .
       dockerfile: docker/api.Dockerfile
     ports:
-      - "8000:8000"
+      - "${API_HOST_PORT:-8010}:8000"
     environment:
       - DATABASE_URL=postgresql://copilot:${DB_PASSWORD:-changeme}@db:5432/maintainers
       - REDIS_URL=redis://redis:6379/0
@@ -192,3 +202,4 @@ services:
 volumes:
   pgdata:
   minio_data:
+  pgadmin_data:

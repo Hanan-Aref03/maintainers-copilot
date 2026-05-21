@@ -1,0 +1,84 @@
+name: CI - Eval Gates
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+
+jobs:
+  classification-eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install uv
+        run: pip install uv
+      - name: Install dependencies
+        run: uv sync
+      - name: Start model server (dummy for CI)
+        run: |
+          # For CI we can run model server in background
+          uv run uvicorn model_server.app.main:app --port 8001 &
+          sleep 5
+      - name: Run classification eval
+        run: |
+          export GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+          uv run python evals/classification_eval.py few
+      - name: Check thresholds
+        run: |
+          python -c "
+          import json, sys
+          with open('evals/classification_report.json') as f:
+              report = json.load(f)
+          with open('evals/eval_thresholds.yaml') as f:
+              import yaml
+              thresholds = yaml.safe_load(f)
+          min_f1 = thresholds['classification']['min_f1_weighted']
+          if report['f1_weighted'] < min_f1:
+              print(f'Classification F1 {report['f1_weighted']} < {min_f1}')
+              sys.exit(1)
+          "
+      - name: Upload classification report
+        uses: actions/upload-artifact@v4
+        with:
+          name: classification-report
+          path: evals/classification_report.json
+
+  rag-eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install uv
+        run: pip install uv
+      - name: Install dependencies
+        run: uv sync
+      - name: Run RAG eval
+        run: |
+          export GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+          uv run python evals/rag_eval.py
+      - name: Check thresholds
+        run: |
+          python -c "
+          import json, sys, yaml
+          with open('evals/rag_report.json') as f:
+              report = json.load(f)
+          with open('evals/eval_thresholds.yaml') as f:
+              thresholds = yaml.safe_load(f)
+          min_recall = thresholds['rag']['min_recall']
+          if report['recall_at_k'] < min_recall:
+              print(f'RAG recall {report['recall_at_k']} < {min_recall}')
+              sys.exit(1)
+          "
+      - name: Upload RAG report
+        uses: actions/upload-artifact@v4
+        with:
+          name: rag-report
+          path: evals/rag_report.json

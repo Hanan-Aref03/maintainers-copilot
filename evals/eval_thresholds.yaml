@@ -1,0 +1,5 @@
+classification:
+  min_accuracy: 0.60
+  min_f1_weighted: 0.55
+rag:
+  min_recall: 0.70
