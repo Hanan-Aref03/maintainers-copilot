@@ -1,44 +1,89 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import './App.css'
 
 const DEFAULT_API_URL = 'http://localhost:8010'
 const DEFAULT_WIDGET_ID = 'widget123'
+const DEFAULT_THEME = {
+  primary_color: '#0f766e',
+  position: 'bottom-right',
+}
 
 function readWidgetConfig() {
-  if (typeof document === 'undefined') {
-    return {
-      apiUrl: DEFAULT_API_URL,
-      widgetId: DEFAULT_WIDGET_ID,
+  const runtimeConfig = typeof window !== 'undefined' ? window.__COPILOT_WIDGET_CONFIG__ ?? {} : {}
+  const scriptTag = typeof document !== 'undefined' ? document.querySelector('script[data-widget-id]') : null
+
+  const scriptOrigin = (() => {
+    if (!scriptTag?.src) {
+      return DEFAULT_API_URL
     }
-  }
-
-  const scriptTag = document.querySelector('script[data-widget-id]')
-  const widgetId = scriptTag?.dataset?.widgetId ?? DEFAULT_WIDGET_ID
-
-  let apiUrl = DEFAULT_API_URL
-  if (scriptTag?.src) {
     try {
-      apiUrl = new URL(scriptTag.src).origin
+      return new URL(scriptTag.src).origin
     } catch {
-      apiUrl = DEFAULT_API_URL
+      return DEFAULT_API_URL
     }
-  }
+  })()
 
   return {
-    apiUrl,
-    widgetId,
+    apiUrl: runtimeConfig.apiUrl ?? scriptOrigin ?? DEFAULT_API_URL,
+    widgetId: runtimeConfig.widgetId ?? scriptTag?.dataset?.widgetId ?? DEFAULT_WIDGET_ID,
+    theme: {
+      ...DEFAULT_THEME,
+      ...(runtimeConfig.theme ?? {}),
+      primary_color: runtimeConfig.theme?.primary_color ?? runtimeConfig.theme?.primaryColor ?? DEFAULT_THEME.primary_color,
+      position: runtimeConfig.theme?.position ?? DEFAULT_THEME.position,
+    },
+    greeting: runtimeConfig.greeting ?? 'Hi! How can I help with issue triage?',
+    enabledTools: Array.isArray(runtimeConfig.enabledTools) ? runtimeConfig.enabledTools : ['classify', 'rag', 'memory'],
   }
 }
 
 const widgetConfig = readWidgetConfig()
 
+function sanitizeMessage(text) {
+  return String(text ?? '').replace(/\s+/g, ' ').trim()
+}
+
 export default function App() {
   const [open, setOpen] = useState(false)
-  const [messages, setMessages] = useState([])
+  const [messages, setMessages] = useState(() =>
+    widgetConfig.greeting
+      ? [{ role: 'assistant', content: widgetConfig.greeting }]
+      : [],
+  )
   const [input, setInput] = useState('')
   const [isSending, setIsSending] = useState(false)
+  const messageListRef = useRef(null)
+  const primaryColor = widgetConfig.theme.primary_color
+
+  useEffect(() => {
+    if (messageListRef.current) {
+      messageListRef.current.scrollTop = messageListRef.current.scrollHeight
+    }
+  }, [messages, open])
+
+  useEffect(() => {
+    const height = open ? 620 : 84
+    window.parent?.postMessage(
+      {
+        type: 'copilot-widget:resize',
+        widgetId: widgetConfig.widgetId,
+        height,
+      },
+      '*',
+    )
+  }, [open, messages.length])
+
+  const positionStyle = useMemo(
+    () =>
+      widgetConfig.theme.position === 'bottom-left'
+        ? { left: '20px', right: 'auto' }
+        : { right: '20px', left: 'auto' },
+    [],
+  )
+  const alignItems = widgetConfig.theme.position === 'bottom-left' ? 'flex-start' : 'flex-end'
 
   const sendMessage = async () => {
-    const prompt = input.trim()
+    const prompt = sanitizeMessage(input)
     if (!prompt || isSending) return
 
     setIsSending(true)
@@ -46,12 +91,14 @@ export default function App() {
     setInput('')
 
     try {
-      const url = new URL('/chat/', widgetConfig.apiUrl)
+      const url = new URL(`/widgets/${widgetConfig.widgetId}/chat`, widgetConfig.apiUrl)
       url.searchParams.set('message', prompt)
-      url.searchParams.set('thread_id', widgetConfig.widgetId)
 
       const response = await fetch(url.toString(), {
         method: 'POST',
+        headers: {
+          'Content-Type': 'text/plain',
+        },
       })
 
       if (!response.ok) {
@@ -80,71 +127,55 @@ export default function App() {
   }
 
   return (
-    <div style={{ position: 'fixed', bottom: 20, right: 20, zIndex: 9999 }}>
+    <div className="copilot-widget" style={{ ...positionStyle, alignItems }}>
       <button
+        className="copilot-launcher"
         onClick={() => setOpen(!open)}
         style={{
-          background: '#3b82f6',
-          color: 'white',
-          border: 'none',
-          borderRadius: 999,
-          padding: '12px 20px',
-          cursor: 'pointer',
-          boxShadow: '0 10px 24px rgba(59, 130, 246, 0.28)',
+          background: `linear-gradient(135deg, ${primaryColor}, #111827)`,
+          boxShadow: '0 18px 36px rgba(15, 118, 110, 0.38)',
         }}
       >
-        {open ? 'Close' : 'Chat'}
+        <span className="copilot-launcher-dot" />
+        {open ? 'Close' : 'Ask Copilot'}
       </button>
-      {open && (
-        <div
-          style={{
-            width: 350,
-            height: 500,
-            background: 'white',
-            border: '1px solid #ccc',
-            borderRadius: 12,
-            marginTop: 10,
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden',
-            boxShadow: '0 24px 48px rgba(15, 23, 42, 0.18)',
-          }}
-        >
-          <div
-            style={{
-              padding: 12,
-              background: '#3b82f6',
-              color: 'white',
-              borderTopLeftRadius: 12,
-              borderTopRightRadius: 12,
-              fontWeight: 600,
-            }}
-          >
-            Maintainer's Copilot
+
+      {open ? (
+        <div className="copilot-panel">
+          <div className="copilot-header" style={{ background: `linear-gradient(135deg, ${primaryColor}, #111827)` }}>
+            <div>
+              <div className="copilot-eyebrow">Maintainer’s Copilot</div>
+              <div className="copilot-title">Issue triage, memory, and docs search</div>
+            </div>
+            <button className="copilot-close" onClick={() => setOpen(false)} aria-label="Close widget">
+              ×
+            </button>
           </div>
-          <div style={{ flex: 1, overflowY: 'auto', padding: 12 }}>
+
+          <div className="copilot-toolbar">
+            {widgetConfig.enabledTools.slice(0, 3).map(tool => (
+              <span key={tool} className="copilot-chip">
+                {tool}
+              </span>
+            ))}
+          </div>
+
+          <div className="copilot-messages" ref={messageListRef}>
             {messages.map((message, index) => (
               <div
-                key={index}
-                style={{
-                  marginBottom: 8,
-                  textAlign: message.role === 'user' ? 'right' : 'left',
-                }}
+                key={`${message.role}-${index}`}
+                className={`copilot-message copilot-message--${message.role}`}
               >
-                <strong>{message.role === 'user' ? 'You' : 'Bot'}:</strong>{' '}
-                {message.content}
+                <div className="copilot-message-role">
+                  {message.role === 'user' ? 'You' : 'Copilot'}
+                </div>
+                <div className="copilot-message-bubble">{message.content}</div>
               </div>
             ))}
           </div>
-          <div
-            style={{
-              padding: 12,
-              borderTop: '1px solid #eee',
-              display: 'flex',
-              gap: 8,
-            }}
-          >
-            <input
+
+          <div className="copilot-composer">
+            <textarea
               value={input}
               onChange={event => setInput(event.target.value)}
               onKeyDown={event => {
@@ -154,31 +185,21 @@ export default function App() {
                 }
               }}
               placeholder="Ask about this repository..."
-              style={{
-                flex: 1,
-                padding: 8,
-                borderRadius: 20,
-                border: '1px solid #ccc',
-              }}
+              rows={2}
             />
             <button
+              className="copilot-send"
               onClick={() => void sendMessage()}
               disabled={isSending || !input.trim()}
               style={{
-                background: '#3b82f6',
-                color: 'white',
-                border: 'none',
-                borderRadius: 20,
-                padding: '8px 16px',
-                opacity: isSending || !input.trim() ? 0.7 : 1,
-                cursor: isSending || !input.trim() ? 'not-allowed' : 'pointer',
+                background: primaryColor,
               }}
             >
               {isSending ? 'Sending...' : 'Send'}
             </button>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   )
 }

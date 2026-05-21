@@ -1,8 +1,12 @@
 import { createRoot } from 'react-dom/client'
 import App from './App'
 
-// Auto-inject widget into host page
-const container = document.createElement('div')
-container.id = 'copilot-widget-root'
-document.body.appendChild(container)
+const existingRoot = document.getElementById('copilot-widget-root')
+const container = existingRoot ?? document.createElement('div')
+
+if (!existingRoot) {
+  container.id = 'copilot-widget-root'
+  document.body.appendChild(container)
+}
+
 createRoot(container).render(<App />)

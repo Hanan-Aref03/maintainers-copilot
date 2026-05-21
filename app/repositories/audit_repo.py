@@ -1,5 +1,6 @@
 from sqlalchemy.orm import Session
 from app.domain.models import AuditLog
+from app.infra.redaction import redact_payload
 import uuid
 
 class AuditRepository:
@@ -11,7 +12,7 @@ class AuditRepository:
             actor_id=actor_id,
             action=action,
             target=target,
-            details=details or {}
+            details=redact_payload(details or {})
         )
         self.db.add(log)
         self.db.commit()

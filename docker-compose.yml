@@ -154,13 +154,14 @@ services:
       - "8501:8501"
     environment:
       - API_URL=http://api:8000
+      - MODEL_SERVER_URL=http://model-server:8001
       - VAULT_ADDR=http://vault:8200
       - VAULT_TOKEN=${VAULT_TOKEN:-devroot}
     depends_on:
       api:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8501/health\")'"]
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8501/healthz\")'"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -175,7 +176,7 @@ services:
       api:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:80/health\")'"]
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:80/widget.js"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -192,7 +193,7 @@ services:
       api:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:80/health\")'"]
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:80/"]
       interval: 10s
       timeout: 5s
       retries: 3

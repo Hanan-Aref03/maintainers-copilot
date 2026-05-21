@@ -1,11 +1,17 @@
-FROM python:3.12-slim
+FROM node:20-alpine AS widget-builder
 
-ENV PYTHONUNBUFFERED=1
+WORKDIR /src/widget
 
-WORKDIR /app
+COPY widget/package*.json ./
+RUN npm ci
 
-COPY scripts/health_server.py /app/health_server.py
+COPY widget/ ./
+RUN npm run build
+
+FROM nginx:alpine
+
+RUN apk add --no-cache wget
+
+COPY --from=widget-builder /src/widget/dist /usr/share/nginx/html
 
 EXPOSE 80
-
-CMD ["python", "/app/health_server.py", "--port", "80", "--name", "widget"]

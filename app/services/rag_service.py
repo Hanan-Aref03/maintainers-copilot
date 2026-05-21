@@ -8,6 +8,7 @@ from rank_bm25 import BM25Okapi
 
 from app.core.config import settings
 from app.infra.ai_clients import GeminiClient, ProviderError
+from app.infra.tracing import trace_span
 
 # Load knowledge base once at module load.
 with open("data_pipeline/knowledge_base.json", encoding="utf-8") as f:
@@ -22,6 +23,7 @@ EMBEDDING_MODEL = "gemini-embedding-2"
 EMBEDDING_DIMENSION = 1536
 
 _embedding_cache: dict[str, list[float]] = {}
+_reranker_unavailable = False
 
 gemini = (
     GeminiClient(
@@ -36,9 +38,20 @@ gemini = (
 
 @lru_cache(maxsize=1)
 def _get_reranker():
+    global _reranker_unavailable
+    if _reranker_unavailable:
+        return None
+
     from sentence_transformers import CrossEncoder
 
-    return CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+    try:
+        return CrossEncoder(
+            "cross-encoder/ms-marco-MiniLM-L-6-v2",
+            local_files_only=True,
+        )
+    except Exception:
+        _reranker_unavailable = True
+        return None
 
 
 def _prepare_query_embedding_text(query: str) -> str:
@@ -133,9 +146,8 @@ def rerank(query: str, candidates: List[tuple]) -> List[tuple]:
     if not candidates:
         return []
 
-    try:
-        reranker = _get_reranker()
-    except Exception:
+    reranker = _get_reranker()
+    if reranker is None:
         return candidates
 
     pairs = [(query, candidate[0]["title"] + "\n" + candidate[0]["body"]) for candidate in candidates]
@@ -168,14 +180,14 @@ Return only the search queries, one per line."""
 
 
 async def retrieve_context(question: str, top_k: int = 5) -> List[Dict]:
-    # 1. Query transformation
-    transformed = query_transform(question)
+    with trace_span("rag.retrieve_context", {"question_preview": question[:240], "top_k": top_k}):
+        with trace_span("rag.query_rewrite", {"question_preview": question[:240]}):
+            transformed = query_transform(question)
 
-    # 2. Hybrid retrieval (use transformed query)
-    initial = hybrid_retrieve(transformed, top_k=10, alpha=0.6)
+        with trace_span("rag.hybrid_retrieve", {"query_preview": transformed[:240], "top_k": 10}):
+            initial = hybrid_retrieve(transformed, top_k=10, alpha=0.6)
 
-    # 3. Rerank
-    reranked = rerank(transformed, initial)
+        with trace_span("rag.rerank", {"candidate_count": len(initial)}):
+            reranked = rerank(transformed, initial)
 
-    # Return top_k after reranking
-    return [doc for doc, score in reranked[:top_k]]
+        return [doc for doc, score in reranked[:top_k]]
