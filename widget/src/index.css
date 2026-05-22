@@ -7,8 +7,22 @@ body,
   height: 100%;
 }
 
+html {
+  color-scheme: dark;
+}
+
 body {
   overflow: hidden;
   background: transparent;
+  font-family:
+    Inter,
+    "Segoe UI",
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    sans-serif;
 }
 
+* {
+  box-sizing: border-box;
+}

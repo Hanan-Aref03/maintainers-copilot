@@ -15,6 +15,26 @@ powershell -ExecutionPolicy Bypass -File scripts/run_full_stack.ps1
 
 If you want only the services without the Vault bootstrap or the schema snapshot, the script accepts `-SkipVaultBootstrap` and `-SkipDatabaseSnapshot`.
 
+## Standalone UI Commands
+Use these when you want to work on just the front-end surfaces.
+
+```powershell
+streamlit run chatbot_streamlit/app.py --server.address 0.0.0.0 --server.port 8501
+```
+
+```powershell
+cd widget
+npm install
+npm run dev
+```
+
+When you are ready to ship the widget bundle for Docker, rebuild it with:
+
+```powershell
+cd widget
+npm run build
+```
+
 ## 1. Create your environment file
 Copy the example file and fill in the real secrets.
 

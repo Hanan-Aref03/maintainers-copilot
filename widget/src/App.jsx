@@ -8,6 +8,39 @@ const DEFAULT_THEME = {
   position: 'bottom-right',
 }
 
+const DEFAULT_QUICK_PROMPTS = [
+  {
+    label: 'Summarize',
+    prompt: 'Summarize the latest maintainer activity and next steps.',
+  },
+  {
+    label: 'Classify',
+    prompt: 'Classify this issue and explain the label choice.',
+  },
+  {
+    label: 'Memory',
+    prompt: 'What long-term memory should I keep for this thread?',
+  },
+]
+
+function sanitizeMessage(text) {
+  return String(text ?? '').replace(/\s+/g, ' ').trim()
+}
+
+function normalizePrompt(item, index) {
+  const label = sanitizeMessage(item?.label ?? item?.title ?? `Prompt ${index + 1}`)
+  const prompt = sanitizeMessage(item?.prompt ?? item?.text ?? '')
+
+  if (!prompt) {
+    return null
+  }
+
+  return {
+    label: label || `Prompt ${index + 1}`,
+    prompt,
+  }
+}
+
 function readWidgetConfig() {
   const runtimeConfig = typeof window !== 'undefined' ? window.__COPILOT_WIDGET_CONFIG__ ?? {} : {}
   const scriptTag = typeof document !== 'undefined' ? document.querySelector('script[data-widget-id]') : null
@@ -16,6 +49,7 @@ function readWidgetConfig() {
     if (!scriptTag?.src) {
       return DEFAULT_API_URL
     }
+
     try {
       return new URL(scriptTag.src).origin
     } catch {
@@ -23,24 +57,44 @@ function readWidgetConfig() {
     }
   })()
 
+  const quickPrompts = Array.isArray(runtimeConfig.quickPrompts) && runtimeConfig.quickPrompts.length > 0
+    ? runtimeConfig.quickPrompts
+        .map((item, index) => normalizePrompt(item, index))
+        .filter(Boolean)
+    : DEFAULT_QUICK_PROMPTS
+
   return {
     apiUrl: runtimeConfig.apiUrl ?? scriptOrigin ?? DEFAULT_API_URL,
     widgetId: runtimeConfig.widgetId ?? scriptTag?.dataset?.widgetId ?? DEFAULT_WIDGET_ID,
     theme: {
       ...DEFAULT_THEME,
       ...(runtimeConfig.theme ?? {}),
-      primary_color: runtimeConfig.theme?.primary_color ?? runtimeConfig.theme?.primaryColor ?? DEFAULT_THEME.primary_color,
+      primary_color:
+        runtimeConfig.theme?.primary_color ??
+        runtimeConfig.theme?.primaryColor ??
+        DEFAULT_THEME.primary_color,
       position: runtimeConfig.theme?.position ?? DEFAULT_THEME.position,
     },
     greeting: runtimeConfig.greeting ?? 'Hi! How can I help with issue triage?',
-    enabledTools: Array.isArray(runtimeConfig.enabledTools) ? runtimeConfig.enabledTools : ['classify', 'rag', 'memory'],
+    enabledTools: Array.isArray(runtimeConfig.enabledTools)
+      ? runtimeConfig.enabledTools
+      : ['classify', 'rag', 'memory'],
+    quickPrompts,
   }
 }
 
 const widgetConfig = readWidgetConfig()
 
-function sanitizeMessage(text) {
-  return String(text ?? '').replace(/\s+/g, ' ').trim()
+function buildAssistantMeta(data) {
+  const retrievedDocIds = Array.isArray(data?.retrieved_doc_ids)
+    ? data.retrieved_doc_ids.filter(Boolean).map(value => String(value))
+    : []
+
+  return {
+    provider: String(data?.llm_provider ?? 'local').toLowerCase(),
+    usedFallback: Boolean(data?.used_fallback),
+    retrievedDocIds,
+  }
 }
 
 export default function App() {
@@ -62,7 +116,7 @@ export default function App() {
   }, [messages, open])
 
   useEffect(() => {
-    const height = open ? 620 : 84
+    const height = open ? Math.min(760, 392 + Math.min(messages.length, 6) * 52) : 92
     window.parent?.postMessage(
       {
         type: 'copilot-widget:resize',
@@ -80,15 +134,20 @@ export default function App() {
         : { right: '20px', left: 'auto' },
     [],
   )
+
   const alignItems = widgetConfig.theme.position === 'bottom-left' ? 'flex-start' : 'flex-end'
 
-  const sendMessage = async () => {
-    const prompt = sanitizeMessage(input)
+  const sendMessage = async overrideMessage => {
+    const prompt = sanitizeMessage(overrideMessage ?? input)
     if (!prompt || isSending) return
 
+    setOpen(true)
     setIsSending(true)
     setMessages(prev => [...prev, { role: 'user', content: prompt }])
-    setInput('')
+
+    if (!overrideMessage) {
+      setInput('')
+    }
 
     try {
       const url = new URL(`/widgets/${widgetConfig.widgetId}/chat`, widgetConfig.apiUrl)
@@ -111,6 +170,7 @@ export default function App() {
         {
           role: 'assistant',
           content: data.response ?? 'No response received.',
+          meta: buildAssistantMeta(data),
         },
       ])
     } catch {
@@ -119,6 +179,11 @@ export default function App() {
         {
           role: 'assistant',
           content: 'Sorry, I could not reach the assistant right now.',
+          meta: {
+            provider: 'local',
+            usedFallback: true,
+            retrievedDocIds: [],
+          },
         },
       ])
     } finally {
@@ -127,32 +192,48 @@ export default function App() {
   }
 
   return (
-    <div className="copilot-widget" style={{ ...positionStyle, alignItems }}>
+    <div
+      className="copilot-widget"
+      style={{
+        ...positionStyle,
+        alignItems,
+        '--copilot-accent': primaryColor,
+      }}
+    >
       <button
+        type="button"
         className="copilot-launcher"
-        onClick={() => setOpen(!open)}
-        style={{
-          background: `linear-gradient(135deg, ${primaryColor}, #111827)`,
-          boxShadow: '0 18px 36px rgba(15, 118, 110, 0.38)',
-        }}
+        onClick={() => setOpen(current => !current)}
       >
         <span className="copilot-launcher-dot" />
-        {open ? 'Close' : 'Ask Copilot'}
+        <span>{open ? 'Close' : 'Ask Copilot'}</span>
       </button>
 
       {open ? (
         <div className="copilot-panel">
-          <div className="copilot-header" style={{ background: `linear-gradient(135deg, ${primaryColor}, #111827)` }}>
+          <div className="copilot-header">
             <div>
-              <div className="copilot-eyebrow">Maintainer’s Copilot</div>
+              <div className="copilot-eyebrow">Maintainer's Copilot</div>
               <div className="copilot-title">Issue triage, memory, and docs search</div>
+              <div className="copilot-subtitle">
+                A focused assistant for maintainers and product owners.
+              </div>
             </div>
-            <button className="copilot-close" onClick={() => setOpen(false)} aria-label="Close widget">
-              ×
+            <button
+              type="button"
+              className="copilot-close"
+              onClick={() => setOpen(false)}
+              aria-label="Close widget"
+            >
+              Close
             </button>
           </div>
 
           <div className="copilot-toolbar">
+            <div className="copilot-status-pill">
+              <span className="copilot-status-dot" />
+              Ready
+            </div>
             {widgetConfig.enabledTools.slice(0, 3).map(tool => (
               <span key={tool} className="copilot-chip">
                 {tool}
@@ -160,18 +241,53 @@ export default function App() {
             ))}
           </div>
 
-          <div className="copilot-messages" ref={messageListRef}>
-            {messages.map((message, index) => (
-              <div
-                key={`${message.role}-${index}`}
-                className={`copilot-message copilot-message--${message.role}`}
+          <div className="copilot-quick-actions">
+            {widgetConfig.quickPrompts.map(prompt => (
+              <button
+                key={prompt.label}
+                type="button"
+                className="copilot-quick-button"
+                onClick={() => void sendMessage(prompt.prompt)}
+                disabled={isSending}
+                title={prompt.prompt}
               >
-                <div className="copilot-message-role">
-                  {message.role === 'user' ? 'You' : 'Copilot'}
-                </div>
-                <div className="copilot-message-bubble">{message.content}</div>
-              </div>
+                <span className="copilot-quick-label">{prompt.label}</span>
+                <span className="copilot-quick-copy">{prompt.prompt}</span>
+              </button>
             ))}
+          </div>
+
+          <div className="copilot-messages" ref={messageListRef}>
+            {messages.map((message, index) => {
+              const isAssistant = message.role === 'assistant'
+              const meta = message.meta ?? null
+
+              return (
+                <div
+                  key={`${message.role}-${index}`}
+                  className={`copilot-message copilot-message--${message.role}`}
+                >
+                  <div className="copilot-message-role">
+                    {isAssistant ? 'Copilot' : 'You'}
+                  </div>
+                  <div className="copilot-message-bubble">{message.content}</div>
+                  {meta ? (
+                    <div className="copilot-message-meta">
+                      <span className="copilot-message-pill">
+                        {meta.usedFallback ? `Fallback: ${meta.provider}` : meta.provider}
+                      </span>
+                      <span className="copilot-message-pill">
+                        {meta.retrievedDocIds.length > 0
+                          ? `${meta.retrievedDocIds.length} source${
+                              meta.retrievedDocIds.length === 1 ? '' : 's'
+                            }`
+                          : 'No sources'}
+                      </span>
+                    </div>
+                  ) : null}
+                </div>
+              )
+            })}
           </div>
 
           <div className="copilot-composer">
@@ -184,19 +300,24 @@ export default function App() {
                   void sendMessage()
                 }
               }}
-              placeholder="Ask about this repository..."
-              rows={2}
+              placeholder="Ask about issue triage, memory, or widget setup..."
+              rows={3}
             />
-            <button
-              className="copilot-send"
-              onClick={() => void sendMessage()}
-              disabled={isSending || !input.trim()}
-              style={{
-                background: primaryColor,
-              }}
-            >
-              {isSending ? 'Sending...' : 'Send'}
-            </button>
+            <div className="copilot-composer-row">
+              <div className="copilot-hint">Enter to send · Shift+Enter for newline</div>
+              <button
+                type="button"
+                className="copilot-send"
+                onClick={() => void sendMessage()}
+                disabled={isSending || !input.trim()}
+              >
+                {isSending ? 'Sending...' : 'Send'}
+              </button>
+            </div>
+          </div>
+
+          <div className="copilot-footer">
+            Connected to <code>{widgetConfig.apiUrl}</code>
           </div>
         </div>
       ) : null}

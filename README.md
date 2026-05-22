@@ -5,6 +5,7 @@ Authenticated assistant for open-source maintainers with issue classification, e
 ## Project Docs
 
 - [Architecture](docs/ARCH.md)
+- [Code Explainer](docs/CODE_EXPLAINER.md)
 - [Decisions](docs/DECISIONS.md)
 - [Runbook](docs/RUNBOOK.md)
 - [Evaluations](docs/EVALS.md)
@@ -27,11 +28,26 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
+For a one-shot Windows startup that also bootstraps Vault and prints the Postgres schema snapshot, use:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/run_full_stack.ps1
+```
+
 If you change the widget source, rebuild the bundle before serving the widget script:
 
 ```bash
 cd widget
 npm run build
+```
+
+To run the interfaces directly during local UI work:
+
+```powershell
+streamlit run chatbot_streamlit/app.py --server.address 0.0.0.0 --server.port 8501
+cd widget
+npm install
+npm run dev
 ```
 
 ## Verification
