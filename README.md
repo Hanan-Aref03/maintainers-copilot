@@ -17,9 +17,12 @@ Authenticated assistant for open-source maintainers with issue classification, e
 - Separate model server for classification, NER, and summarization
 - Redis short-term memory and Postgres + pgvector long-term memory
 - Vault-backed secret bootstrap and request/payload redaction
-- Streamlit admin console for operators and demos
+- MinIO-backed file attachments with Postgres metadata and Streamlit download controls
+- Structured MinIO buckets for model artifacts, eval runs, and conversation snapshots
+- Streamlit admin console with an embedded host-page widget preview
 - React widget bundle served from the API and host demo
 - Deterministic evaluation scripts and golden sets
+- DistilBERT fine-tuning notebook for `pandas-dev/pandas` issues
 
 ## Quick Start
 
@@ -39,6 +42,18 @@ If you change the widget source, rebuild the bundle before serving the widget sc
 ```bash
 cd widget
 npm run build
+```
+
+To work on the transformer classifier, open:
+
+```text
+notebooks/pandas_distilbert_issue_classifier.ipynb
+```
+
+The notebook writes its artifacts to:
+
+```text
+model_server/models/fine_tuned/distilbert_pandas_issues/
 ```
 
 To run the interfaces directly during local UI work:

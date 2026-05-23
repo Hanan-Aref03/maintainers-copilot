@@ -3,12 +3,38 @@ from __future__ import annotations
 import asyncio
 import json
 import math
-from typing import Iterable
+from typing import Iterable, TypeVar
 
-from ragas.embeddings.base import BaseRagasEmbedding
-from ragas.llms.base import InstructorBaseRagasLLM, InstructorTypeVar
-from ragas.metrics.collections.answer_relevancy.metric import AnswerRelevancy
-from ragas.metrics.collections.faithfulness.metric import Faithfulness
+try:
+    from ragas.embeddings.base import BaseRagasEmbedding
+    from ragas.llms.base import InstructorBaseRagasLLM, InstructorTypeVar
+    from ragas.metrics.collections.answer_relevancy.metric import AnswerRelevancy
+    from ragas.metrics.collections.faithfulness.metric import Faithfulness
+    RAGAS_AVAILABLE = True
+except Exception:  # pragma: no cover - exercised only when ragas is unavailable locally
+    InstructorTypeVar = TypeVar("InstructorTypeVar")
+
+    class BaseRagasEmbedding:  # type: ignore[no-redef]
+        pass
+
+    class InstructorBaseRagasLLM:  # type: ignore[no-redef]
+        pass
+
+    class _UnavailableMetric:
+        def __init__(self, *args, **kwargs):
+            del args, kwargs
+
+        async def ascore(self, *args, **kwargs):
+            del args, kwargs
+            raise RuntimeError("ragas is unavailable in this environment")
+
+    class Faithfulness(_UnavailableMetric):  # type: ignore[no-redef]
+        pass
+
+    class AnswerRelevancy(_UnavailableMetric):  # type: ignore[no-redef]
+        pass
+
+    RAGAS_AVAILABLE = False
 
 from app.core.config import settings
 from app.infra.ai_clients import GeminiClient
@@ -123,6 +149,8 @@ def build_ragas_metrics(
     embeddings: BaseRagasEmbedding,
     strictness: int = 2,
 ):
+    if not RAGAS_AVAILABLE:
+        return [Faithfulness(), AnswerRelevancy()]
     return [
         Faithfulness(llm=llm),
         AnswerRelevancy(llm=llm, embeddings=embeddings, strictness=strictness),

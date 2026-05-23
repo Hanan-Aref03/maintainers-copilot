@@ -5,9 +5,10 @@ import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import routes_auth, routes_chat, routes_widgets, routes_memory
+from app.api import routes_attachments, routes_auth, routes_chat, routes_memory, routes_widgets
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
+from app.infra.storage_bootstrap import ensure_minio_storage
 from app.infra.database import get_session_local
 from app.infra.vault_client import VaultClient
 from app.services.bootstrap_service import bootstrap_demo_data
@@ -17,6 +18,8 @@ logger = logging.getLogger(__name__)
 
 
 app = FastAPI(title="Maintainer's Copilot")
+app.state.minio_ready = False
+app.state.storage_buckets_ready = {}
 install_fastapi_observability(app, "copilot-api")
 
 cors_allow_origins = [
@@ -44,9 +47,15 @@ async def startup_event():
         settings.gemini_api_key = VaultClient.get_gemini_api_key() or settings.gemini_api_key
         settings.voyage_api_key = VaultClient.get_voyage_api_key() or settings.voyage_api_key
         settings.jwt_secret = VaultClient.get_secret("jwt_secret") or settings.jwt_secret
+        settings.minio_access_key = VaultClient.get_secret("minio_access_key") or settings.minio_access_key
+        settings.minio_secret_key = VaultClient.get_secret("minio_secret_key") or settings.minio_secret_key
         logger.info("Vault secrets loaded")
     else:
         logger.warning("Vault secrets unavailable; using local settings")
+
+    storage_status = ensure_minio_storage()
+    app.state.storage_buckets_ready = storage_status
+    app.state.minio_ready = all(storage_status.values())
 
     if settings.bootstrap_demo_data:
         session_local = get_session_local()
@@ -68,6 +77,13 @@ async def health():
         "vault_loaded": bool(VaultClient._secrets),
         "gemini_ready": bool(settings.gemini_api_key),
         "voyage_ready": bool(settings.voyage_api_key),
+        "minio_ready": bool(getattr(app.state, "minio_ready", False)),
+        "minio_credentials_ready": bool(settings.minio_access_key and settings.minio_secret_key),
+        "storage_buckets_ready": getattr(app.state, "storage_buckets_ready", {}),
+        "minio_bucket": settings.minio_bucket,
+        "minio_model_bucket": settings.minio_model_bucket,
+        "minio_eval_bucket": settings.minio_eval_bucket,
+        "minio_snapshot_bucket": settings.minio_snapshot_bucket,
         "gemini_model": settings.gemini_model,
         "voyage_embedding_model": settings.voyage_embedding_model,
     }
@@ -78,5 +94,6 @@ app.include_router(routes_auth.router, prefix="/auth", tags=["auth"])
 app.include_router(routes_chat.router, prefix="/chat", tags=["chat"])
 app.include_router(routes_widgets.router, prefix="/widgets", tags=["widgets"])
 app.include_router(routes_memory.router, prefix="/memory", tags=["memory"])
+app.include_router(routes_attachments.router, prefix="/attachments", tags=["attachments"])
 
 register_exception_handlers(app)

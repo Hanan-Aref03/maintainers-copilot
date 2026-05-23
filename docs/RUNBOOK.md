@@ -22,10 +22,35 @@ Use these when you want to work on just the front-end surfaces.
 streamlit run chatbot_streamlit/app.py --server.address 0.0.0.0 --server.port 8501
 ```
 
+The Widgets tab embeds the host demo page in an iframe so you can see the floating assistant inside a product-like shell.
+
+The Attachments tab is the MinIO-backed file console. Use it to upload a file, inspect the metadata stored in Postgres, and download the object back through the API.
+
+MinIO is split into dedicated buckets so artifact families stay separate:
+
+- `copilot-attachments` for user uploads
+- `copilot-model-artifacts` for classifier manifests and binaries
+- `copilot-eval-artifacts` for CI eval reports
+- `copilot-conversation-snapshots` for recent chat retrieval snapshots
+
 ```powershell
 cd widget
 npm install
 npm run dev
+```
+
+## Transformer Notebook
+
+Use this notebook to train the DistilBERT issue classifier on `pandas-dev/pandas`:
+
+```text
+notebooks/pandas_distilbert_issue_classifier.ipynb
+```
+
+It saves the resulting artifacts to:
+
+```text
+model_server/models/fine_tuned/distilbert_pandas_issues/
 ```
 
 When you are ready to ship the widget bundle for Docker, rebuild it with:
@@ -80,6 +105,8 @@ docker compose up -d model-server api streamlit widget host
 - Streamlit: `http://localhost:8501`
 - Widget: `http://localhost:8080`
 - Host demo: `http://localhost:3000`
+- MinIO API: `http://localhost:9000`
+- MinIO console: `http://localhost:9001`
 - pgAdmin: `http://localhost:5050`
 - Jaeger: `http://localhost:16686`
 
@@ -87,4 +114,7 @@ docker compose up -d model-server api streamlit widget host
 - Rebuild the widget after any change in `widget/src/`.
 - The API defaults to port `8010` to avoid conflicts with local Docker setups.
 - Vault secrets are bootstrapped separately.
+- Attachment blobs live in the `copilot-attachments` MinIO bucket by default.
+- Model artifacts, eval reports, and conversation snapshots each have their own bucket.
+- Use the MinIO root credentials from `.env` or the Vault bootstrap scripts to sign in to the MinIO console.
 - If Postgres auth fails, the local volume may still have old credentials.

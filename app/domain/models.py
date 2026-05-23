@@ -33,6 +33,19 @@ class Widget(Base):
     enabled_tools = Column(JSON, default=lambda: ["classify", "rag", "memory"])
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+class Attachment(Base):
+    __tablename__ = "attachments"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), index=True, nullable=False)
+    bucket_name = Column(String, nullable=False)
+    object_key = Column(String, unique=True, index=True, nullable=False)
+    filename = Column(String, nullable=False)
+    content_type = Column(String)
+    size_bytes = Column(Integer, nullable=False)
+    sha256 = Column(String(64), index=True, nullable=False)
+    notes = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
 class LongTermMemory(Base):
     __tablename__ = "long_term_memory"
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

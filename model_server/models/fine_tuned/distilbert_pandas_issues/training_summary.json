@@ -1,0 +1,27 @@
+{
+  "model_name": "distilbert-base-uncased",
+  "tokenizer_source": "local_wordpiece",
+  "model_source": "local_distilbert_scratch",
+  "labels": [
+    "bug",
+    "feature",
+    "docs",
+    "question",
+    "other"
+  ],
+  "splits": {
+    "train": 18,
+    "val": 7,
+    "test": 6
+  },
+  "test_metrics": {
+    "eval_loss": 1.6039565801620483,
+    "eval_accuracy": 0.16666666666666666,
+    "eval_macro_f1": 0.07142857142857142,
+    "eval_weighted_f1": 0.047619047619047616,
+    "eval_runtime": 0.0743,
+    "eval_samples_per_second": 80.711,
+    "eval_steps_per_second": 13.452,
+    "epoch": 3.0
+  }
+}

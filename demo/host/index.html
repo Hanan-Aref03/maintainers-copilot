@@ -1,12 +1,395 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Demo Host</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Maintainers' Copilot Demo Host</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family:
+        Inter,
+        "Segoe UI",
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        sans-serif;
+      color: #0f172a;
+      background: #e2e8f0;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at top left, rgba(15, 118, 110, 0.16), transparent 26%),
+        radial-gradient(circle at top right, rgba(59, 130, 246, 0.12), transparent 24%),
+        linear-gradient(180deg, #f8fafc 0%, #e2e8f0 100%);
+    }
+
+    .page {
+      min-height: 100vh;
+      padding: 24px 24px 124px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+
+    .brand {
+      max-width: 72ch;
+    }
+
+    .eyebrow {
+      margin: 0 0 6px;
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.18em;
+      color: #0f766e;
+      font-weight: 800;
+    }
+
+    h1,
+    h2,
+    h3,
+    p {
+      margin: 0;
+    }
+
+    .title {
+      font-size: clamp(1.8rem, 3.2vw, 2.8rem);
+      line-height: 1.05;
+      letter-spacing: -0.03em;
+    }
+
+    .subtitle {
+      margin-top: 10px;
+      color: #475569;
+      line-height: 1.6;
+      font-size: 0.98rem;
+    }
+
+    .status-row {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 10px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.76);
+      border: 1px solid rgba(15, 23, 42, 0.08);
+      color: #0f172a;
+      font-size: 0.78rem;
+      font-weight: 700;
+      box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.82fr);
+      gap: 18px;
+      align-items: start;
+    }
+
+    .surface {
+      border-radius: 24px;
+      border: 1px solid rgba(15, 23, 42, 0.08);
+      background: rgba(255, 255, 255, 0.84);
+      box-shadow: 0 18px 40px rgba(15, 23, 42, 0.08);
+      backdrop-filter: blur(12px);
+    }
+
+    .article {
+      padding: 22px;
+      display: grid;
+      gap: 18px;
+    }
+
+    .article-title {
+      font-size: clamp(1.5rem, 2.4vw, 2rem);
+      line-height: 1.15;
+      letter-spacing: -0.02em;
+    }
+
+    .article-copy {
+      color: #475569;
+      line-height: 1.65;
+      max-width: 70ch;
+    }
+
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .metric {
+      padding: 14px;
+      border-radius: 18px;
+      background: rgba(248, 250, 252, 0.92);
+      border: 1px solid rgba(15, 23, 42, 0.08);
+    }
+
+    .metric-label {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      color: #64748b;
+      font-weight: 800;
+    }
+
+    .metric-value {
+      margin-top: 6px;
+      font-size: 1.35rem;
+      font-weight: 800;
+      color: #0f172a;
+    }
+
+    .metric-copy {
+      margin-top: 6px;
+      color: #475569;
+      line-height: 1.45;
+      font-size: 0.88rem;
+    }
+
+    .timeline {
+      display: grid;
+      gap: 10px;
+    }
+
+    .timeline-item {
+      display: flex;
+      gap: 12px;
+      padding: 14px 16px;
+      border-radius: 18px;
+      background: rgba(255, 255, 255, 0.72);
+      border: 1px solid rgba(15, 23, 42, 0.08);
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: #0f766e;
+      margin-top: 6px;
+      box-shadow: 0 0 0 6px rgba(15, 118, 110, 0.12);
+      flex: 0 0 auto;
+    }
+
+    .timeline-copy {
+      color: #475569;
+      line-height: 1.5;
+      font-size: 0.92rem;
+      margin-top: 4px;
+    }
+
+    .rail {
+      padding: 20px;
+      display: grid;
+      gap: 14px;
+    }
+
+    .rail-card {
+      padding: 16px;
+      border-radius: 18px;
+      background: rgba(248, 250, 252, 0.9);
+      border: 1px solid rgba(15, 23, 42, 0.08);
+    }
+
+    .rail-title {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      color: #64748b;
+      font-weight: 800;
+    }
+
+    .rail-headline {
+      margin-top: 8px;
+      font-size: 1.05rem;
+      font-weight: 800;
+      color: #0f172a;
+    }
+
+    .rail-copy {
+      margin-top: 8px;
+      color: #475569;
+      line-height: 1.55;
+      font-size: 0.92rem;
+    }
+
+    .rail-list {
+      margin: 0;
+      padding-left: 18px;
+      color: #334155;
+      line-height: 1.6;
+      display: grid;
+      gap: 6px;
+    }
+
+    .footer-note {
+      margin-top: 18px;
+      color: #64748b;
+      font-size: 0.84rem;
+      line-height: 1.5;
+    }
+
+    @media (max-width: 980px) {
+      .topbar,
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      .topbar {
+        display: grid;
+      }
+
+      .status-row {
+        justify-content: flex-start;
+      }
+
+      .metric-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
 </head>
 <body>
-    <h1>Welcome to the demo host</h1>
-    <p>This website embeds the Copilot widget.</p>
-    <!-- Load widget script with widget ID -->
-    <script src="http://localhost:8010/widgets/widget.js?widget_id=demo123" data-widget-id="demo123"></script>
+  <div class="page">
+    <div class="topbar">
+      <div class="brand">
+        <p class="eyebrow">Live demo host</p>
+        <h1 class="title">Maintainers' Copilot in a real product surface</h1>
+        <p class="subtitle">
+          This page acts like a lightweight maintainer console. The floating widget stays active on top
+          of the content so Streamlit can embed the whole experience as an app inside an app.
+        </p>
+      </div>
+
+      <div class="status-row">
+        <span class="pill" id="widget-pill">Widget demo123</span>
+        <span class="pill">Origin allow-list on</span>
+        <span class="pill">Floating chat enabled</span>
+      </div>
+    </div>
+
+    <div class="layout">
+      <main class="surface article">
+        <div>
+          <p class="eyebrow">Repository snapshot</p>
+          <h2 class="article-title">A concise workspace for triage, memory, and retrieval.</h2>
+          <p class="article-copy">
+            Use this host page to review signals, scan issue themes, and exercise the widget in a realistic
+            context. The assistant stays visible while you read, which makes the demo feel closer to a real
+            maintainer workflow.
+          </p>
+        </div>
+
+        <div class="metric-grid">
+          <div class="metric">
+            <div class="metric-label">Open issues</div>
+            <div class="metric-value">24</div>
+            <div class="metric-copy">4 need immediate triage.</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">High priority</div>
+            <div class="metric-value">7</div>
+            <div class="metric-copy">Most are label and docs updates.</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Memory notes</div>
+            <div class="metric-value">12</div>
+            <div class="metric-copy">Durable context from prior threads.</div>
+          </div>
+        </div>
+
+        <div class="timeline">
+          <div class="timeline-item">
+            <span class="dot"></span>
+            <div>
+              <strong>Morning triage</strong>
+              <div class="timeline-copy">Classify fresh issues, flag duplicates, and capture any repeated maintainer decisions.</div>
+            </div>
+          </div>
+          <div class="timeline-item">
+            <span class="dot"></span>
+            <div>
+              <strong>Midday review</strong>
+              <div class="timeline-copy">Summarize the thread, retrieve source context, and keep the assistant fallback status visible.</div>
+            </div>
+          </div>
+          <div class="timeline-item">
+            <span class="dot"></span>
+            <div>
+              <strong>End-of-day handoff</strong>
+              <div class="timeline-copy">Store procedural guidance so the next maintainer gets a clean and consistent handoff.</div>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      <aside class="surface rail">
+        <div class="rail-card">
+          <div class="rail-title">Current focus</div>
+          <div class="rail-headline">Use the widget without leaving the page.</div>
+          <div class="rail-copy">
+            Streamlit can embed this host page inside an iframe, which keeps the widget, host context, and
+            operator console on the same screen.
+          </div>
+        </div>
+
+        <div class="rail-card">
+          <div class="rail-title">What to test</div>
+          <ul class="rail-list">
+            <li>Issue classification</li>
+            <li>RAG-backed responses</li>
+            <li>Memory writes and retrieval</li>
+            <li>Fallback visibility</li>
+          </ul>
+        </div>
+
+        <div class="rail-card">
+          <div class="rail-title">Embed snippet</div>
+          <div class="rail-copy">
+            The widget bundle is loaded dynamically from the API so the same host page can preview any widget
+            ID passed through the query string.
+          </div>
+        </div>
+
+        <div class="footer-note">
+          The page stays intentionally simple so the widget remains the focal point while still looking like a
+          finished product surface.
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(window.location.search)
+    const widgetId = params.get('widget_id') || 'demo123'
+    const widgetPill = document.getElementById('widget-pill')
+    if (widgetPill) {
+      widgetPill.textContent = `Widget ${widgetId}`
+    }
+
+    const script = document.createElement('script')
+    script.src = `http://localhost:8010/widgets/widget.js?widget_id=${encodeURIComponent(widgetId)}`
+    script.dataset.widgetId = widgetId
+    document.body.appendChild(script)
+  </script>
 </body>
 </html>

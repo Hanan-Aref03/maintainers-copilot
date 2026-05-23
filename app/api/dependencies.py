@@ -8,6 +8,7 @@ from app.domain.schemas import CurrentUser
 from app.infra.auth import decode_access_token
 from app.infra.database import get_session_local
 from app.repositories.user_repo import UserRepository
+from app.services.attachment_service import AttachmentService
 from app.services.chat_service import ChatService
 
 
@@ -82,3 +83,7 @@ def get_current_admin_user(
 
 def get_chat_service(db: Session = Depends(get_db)) -> ChatService:
     return ChatService(db=db)
+
+
+def get_attachment_service(db: Session = Depends(get_db)) -> AttachmentService:
+    return AttachmentService(db=db)

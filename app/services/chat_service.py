@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.infra.ai_clients import GeminiClient, ProviderError, VoyageClient
+from app.services.conversation_snapshot_service import ConversationSnapshotService
 from app.infra.redaction import redact_text
 from app.infra.tracing import trace_span
 from app.infra.redis_client import ShortTermMemory
@@ -16,9 +17,10 @@ from app.services.rag_service import retrieve_context
 
 
 class ChatService:
-    def __init__(self, db: Session | None = None) -> None:
+    def __init__(self, db: Session | None = None, *, snapshot_service: ConversationSnapshotService | None = None) -> None:
         self.db = db
         self.memory_repo = MemoryRepository(db) if db is not None else None
+        self.snapshot_service = snapshot_service or ConversationSnapshotService()
         self.gemini = (
             GeminiClient(
                 api_key=settings.gemini_api_key,
@@ -54,6 +56,7 @@ class ChatService:
                 "response": "Please send a non-empty message.",
                 "used_fallback": True,
                 "llm_provider": "local",
+                "fallback_reason": "empty_message",
                 "retrieved_doc_ids": [],
                 "retrieved_contexts": [],
                 "memory_count": 0,
@@ -87,6 +90,7 @@ class ChatService:
             answer = self._build_fallback_reply(cleaned_message, memory_context, rag_context)
             used_fallback = True
             llm_provider = "local"
+            fallback_reason = "provider_missing"
 
             if self.gemini is not None:
                 try:
@@ -101,18 +105,21 @@ class ChatService:
                         answer = await asyncio.to_thread(self.gemini.generate_text, prompt)
                         used_fallback = False
                         llm_provider = "gemini"
+                        fallback_reason = None
                 except ProviderError:
                     answer = self._build_fallback_reply(cleaned_message, memory_context, rag_context)
                     used_fallback = True
                     llm_provider = "local"
+                    fallback_reason = "provider_error"
 
             safe_answer = redact_text(answer)
             await self._append_short_term_message(thread_id, "user", cleaned_message)
             await self._append_short_term_message(thread_id, "assistant", safe_answer)
-            return {
+            result = {
                 "response": safe_answer,
                 "used_fallback": used_fallback,
                 "llm_provider": llm_provider,
+                "fallback_reason": fallback_reason,
                 "retrieved_doc_ids": [doc.get("id") for doc in retrieved_docs],
                 "retrieved_contexts": [
                     f"{str(doc.get('title') or '').strip()}\n{str(doc.get('body') or '').strip()}".strip()
@@ -121,6 +128,14 @@ class ChatService:
                 "memory_count": len(relevant_memories),
                 "conversation_count": len(short_term_messages),
             }
+            await self._record_conversation_snapshot(
+                thread_id=thread_id,
+                user_id=user_id,
+                message=cleaned_message,
+                result=result,
+                retrieved_docs=retrieved_docs,
+            )
+            return result
 
     def _load_memories(self, user_id: UUID):
         if self.memory_repo is None:
@@ -160,6 +175,39 @@ class ChatService:
                 role,
                 content,
                 ttl_seconds=settings.short_term_memory_ttl_seconds,
+            )
+        except Exception:
+            return
+
+    async def _record_conversation_snapshot(
+        self,
+        *,
+        thread_id: str,
+        user_id: UUID,
+        message: str,
+        result: dict[str, object],
+        retrieved_docs,
+    ) -> None:
+        try:
+            await asyncio.to_thread(
+                self.snapshot_service.record_snapshot,
+                thread_id=thread_id,
+                payload={
+                    "user_id": str(user_id),
+                    "thread_id": thread_id,
+                    "message": message,
+                    "response": str(result.get("response") or ""),
+                    "llm_provider": result.get("llm_provider"),
+                    "used_fallback": bool(result.get("used_fallback", False)),
+                    "fallback_reason": result.get("fallback_reason"),
+                    "retrieved_doc_ids": [doc.get("id") for doc in retrieved_docs],
+                    "retrieved_contexts": [
+                        f"{str(doc.get('title') or '').strip()}\n{str(doc.get('body') or '').strip()}".strip()
+                        for doc in retrieved_docs
+                    ],
+                    "memory_count": result.get("memory_count", 0),
+                    "conversation_count": result.get("conversation_count", 0),
+                },
             )
         except Exception:
             return

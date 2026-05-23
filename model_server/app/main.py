@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from functools import lru_cache
 from pathlib import Path
@@ -7,6 +8,8 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+from app.core.config import settings
+from app.infra.blob_store import get_blob_store
 from .classifiers import (
     FineTunedClassifier,
     GeminiEntityExtractor,
@@ -18,6 +21,8 @@ from .classifiers import (
     RuleSummarizer,
 )
 from shared.observability import install_fastapi_observability, trace_span
+
+logger = logging.getLogger(__name__)
 
 
 def load_repo_env() -> None:
@@ -40,6 +45,7 @@ def load_repo_env() -> None:
 load_repo_env()
 
 app = FastAPI(title="Model Server")
+app.state.model_artifacts_ready = False
 install_fastapi_observability(app, "copilot-model-server")
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -49,6 +55,16 @@ FINE_TUNED_MODEL_DIR = os.getenv("FINE_TUNED_MODEL_DIR", "artifacts/classificati
 rule_clf = RuleClassifier()
 rule_ner = RuleEntityExtractor()
 rule_summarizer = RuleSummarizer()
+
+
+@app.on_event("startup")
+async def startup_event():
+    try:
+        get_blob_store(settings.minio_model_bucket).ensure_bucket()
+        app.state.model_artifacts_ready = True
+    except Exception:
+        logger.exception("Failed to bootstrap the model artifact bucket")
+        app.state.model_artifacts_ready = False
 
 
 @lru_cache(maxsize=1)
@@ -183,6 +199,8 @@ async def health():
         "status": "ok",
         "gemini_ready": bool(GEMINI_API_KEY),
         "gemini_model": GEMINI_MODEL,
+        "model_artifacts_ready": bool(getattr(app.state, "model_artifacts_ready", False)),
+        "model_artifacts_bucket": settings.minio_model_bucket,
         "classification_ready": True,
         "fine_tuned_ready": bool(get_fine_clf()),
         "ner_ready": True,

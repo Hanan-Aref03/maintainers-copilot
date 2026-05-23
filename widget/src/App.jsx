@@ -11,15 +11,15 @@ const DEFAULT_THEME = {
 const DEFAULT_QUICK_PROMPTS = [
   {
     label: 'Summarize',
-    prompt: 'Summarize the latest maintainer activity and next steps.',
+    prompt: 'Summarize this thread.',
   },
   {
     label: 'Classify',
-    prompt: 'Classify this issue and explain the label choice.',
+    prompt: 'Suggest the best label.',
   },
   {
     label: 'Memory',
-    prompt: 'What long-term memory should I keep for this thread?',
+    prompt: 'Capture a durable note.',
   },
 ]
 
@@ -75,7 +75,7 @@ function readWidgetConfig() {
         DEFAULT_THEME.primary_color,
       position: runtimeConfig.theme?.position ?? DEFAULT_THEME.position,
     },
-    greeting: runtimeConfig.greeting ?? 'Hi! How can I help with issue triage?',
+    greeting: runtimeConfig.greeting ?? 'How can I help?',
     enabledTools: Array.isArray(runtimeConfig.enabledTools)
       ? runtimeConfig.enabledTools
       : ['classify', 'rag', 'memory'],
@@ -206,18 +206,16 @@ export default function App() {
         onClick={() => setOpen(current => !current)}
       >
         <span className="copilot-launcher-dot" />
-        <span>{open ? 'Close' : 'Ask Copilot'}</span>
+        <span>{open ? 'Close' : 'Open Copilot'}</span>
       </button>
 
       {open ? (
         <div className="copilot-panel">
           <div className="copilot-header">
             <div>
-              <div className="copilot-eyebrow">Maintainer's Copilot</div>
-              <div className="copilot-title">Issue triage, memory, and docs search</div>
-              <div className="copilot-subtitle">
-                A focused assistant for maintainers and product owners.
-              </div>
+              <div className="copilot-eyebrow">Maintainers' Copilot</div>
+              <div className="copilot-title">Fast triage and repo memory</div>
+              <div className="copilot-subtitle">Concise answers, sources, and clear fallback status.</div>
             </div>
             <button
               type="button"
@@ -232,7 +230,7 @@ export default function App() {
           <div className="copilot-toolbar">
             <div className="copilot-status-pill">
               <span className="copilot-status-dot" />
-              Ready
+              Live
             </div>
             {widgetConfig.enabledTools.slice(0, 3).map(tool => (
               <span key={tool} className="copilot-chip">
@@ -273,9 +271,12 @@ export default function App() {
                   <div className="copilot-message-bubble">{message.content}</div>
                   {meta ? (
                     <div className="copilot-message-meta">
-                      <span className="copilot-message-pill">
-                        {meta.usedFallback ? `Fallback: ${meta.provider}` : meta.provider}
-                      </span>
+                      <span className="copilot-message-pill">{meta.provider}</span>
+                      {meta.usedFallback ? (
+                        <span className="copilot-message-pill copilot-message-pill--warn">
+                          fallback
+                        </span>
+                      ) : null}
                       <span className="copilot-message-pill">
                         {meta.retrievedDocIds.length > 0
                           ? `${meta.retrievedDocIds.length} source${
@@ -300,11 +301,11 @@ export default function App() {
                   void sendMessage()
                 }
               }}
-              placeholder="Ask about issue triage, memory, or widget setup..."
+              placeholder="Ask about an issue, thread, or widget setup..."
               rows={3}
             />
             <div className="copilot-composer-row">
-              <div className="copilot-hint">Enter to send · Shift+Enter for newline</div>
+              <div className="copilot-hint">Enter to send | Shift+Enter for newline</div>
               <button
                 type="button"
                 className="copilot-send"
@@ -317,7 +318,7 @@ export default function App() {
           </div>
 
           <div className="copilot-footer">
-            Connected to <code>{widgetConfig.apiUrl}</code>
+            API <code>{widgetConfig.apiUrl}</code>
           </div>
         </div>
       ) : null}

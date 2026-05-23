@@ -42,10 +42,14 @@ _SENSITIVE_KEYS = {
     "password",
     "secret",
     "token",
+    "minio_access_key",
+    "minio_root_user",
     "vault_token",
     "db_password",
     "minio_secret",
     "minio_password",
+    "minio_secret_key",
+    "minio_root_password",
 }
 
 _PATTERNS: list[tuple[re.Pattern[str], str | None]] = [
@@ -55,7 +59,9 @@ _PATTERNS: list[tuple[re.Pattern[str], str | None]] = [
     (re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"), REDACTION_PLACEHOLDER),
     (re.compile(r"(?i)\b(authorization\s*:\s*bearer\s+)([^\s]+)"), r"\1" + REDACTION_PLACEHOLDER),
     (
-        re.compile(r"(?i)\b((?:api[_-]?key|token|secret|password|jwt|vault_token|db_password)\s*[:=]\s*)([^\s,;'\"`]+)"),
+        re.compile(
+            r"(?i)\b((?:api[_-]?key|token|secret|password|jwt|vault_token|db_password|minio_access_key|minio_secret_key|minio_root_user|minio_root_password)\s*[:=]\s*)([^\s,;'\"`]+)"
+        ),
         r"\1" + REDACTION_PLACEHOLDER,
     ),
 ]

@@ -65,3 +65,17 @@ class WidgetRead(BaseModel):
     greeting: str
     enabled_tools: list[str] = Field(default_factory=list)
     created_at: datetime | None = None
+
+
+class AttachmentRead(BaseModel):
+    id: UUID
+    owner_id: UUID
+    bucket_name: str
+    object_key: str
+    filename: str
+    content_type: str | None = None
+    size_bytes: int
+    sha256: str
+    notes: str | None = None
+    created_at: datetime | None = None
+    download_url: str | None = None

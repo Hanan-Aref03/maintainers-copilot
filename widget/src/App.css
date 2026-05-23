@@ -177,7 +177,7 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  min-height: 88px;
+  min-height: 78px;
   transition:
     transform 180ms ease,
     border-color 180ms ease,
@@ -197,13 +197,13 @@
 
 .copilot-quick-label {
   font-size: 0.76rem;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: rgba(226, 232, 240, 0.74);
 }
 
 .copilot-quick-copy {
-  font-size: 0.83rem;
+  font-size: 0.8rem;
   line-height: 1.45;
   color: #f8fafc;
 }
@@ -274,6 +274,12 @@
   border: 1px solid rgba(148, 163, 184, 0.12);
 }
 
+.copilot-message-pill--warn {
+  background: rgba(245, 158, 11, 0.14);
+  color: #fde68a;
+  border-color: rgba(245, 158, 11, 0.2);
+}
+
 .copilot-composer {
   padding: 14px 18px 14px;
   border-top: 1px solid rgba(148, 163, 184, 0.14);
@@ -315,6 +321,7 @@
 .copilot-hint {
   color: rgba(226, 232, 240, 0.58);
   font-size: 0.78rem;
+  line-height: 1.4;
 }
 
 .copilot-send {
@@ -347,7 +354,7 @@
 .copilot-footer {
   padding: 0 18px 18px;
   color: rgba(226, 232, 240, 0.56);
-  font-size: 0.78rem;
+  font-size: 0.74rem;
 }
 
 .copilot-footer code {

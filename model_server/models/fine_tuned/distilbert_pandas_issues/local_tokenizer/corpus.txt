@@ -1,0 +1,1325 @@
+ENH: Add DataFrame.memory_report() for actionable dtype optimization suggestions
+<img width="827" height="732" alt="Image" src="https://github.com/user-attachments/assets/5670345d-6e44-4449-9cb1-5bb2357051a3" />
+
+### Feature Type
+
+- [x] Adding new functionality to pandas
+
+- [ ] Changing existing functionality in pandas
+
+- [ ] Removing existing functionality in pandas
+
+
+### Problem Description
+
+DataFrame.memory_usage() tells you how much memory a DataFrame uses, but gives no
+guidance on why or what to do about it. Users who want to optimize memory must:
+
+- Manually inspect each column's dtype
+- Know the integer/float downcast rules by heart
+- Manually check cardinality for object columns
+- Write their own loops to apply changes
+
+This is a very common pain point — especially for data engineers and analysts working
+with medium-to-large datasets who hit memory pressure and have no built-in tool to
+diagnose it.
+
+### Feature Description
+
+A new method DataFrame.memory_report() that:
+
+1. Analyzes every column's current dtype and actual value range
+2. Suggests the smallest safe dtype for each column
+3. Explains why each suggestion is safe (value range, cardinality ratio)
+4. Returns a rich MemoryReport object that is both human-readable and
+5. machine-readable
+6. Never modifies the DataFrame — purely diagnostic, zero side effects
+
+def memory_report(
+    self,
+    verbose: bool = True,
+    category_threshold: float = 0.5,
+    check_datetimes: bool = True,
+) -> MemoryReport:
+    """
+    Analyze memory usage and suggest safe dtype optimizations.
+
+    Parameters
+    ----------
+    verbose : bool, default True
+        If True, print the full report to stdout.
+    category_threshold : float, default 0.5
+        Suggest ``category`` dtype when unique ratio is below this value.
+        For example, 0.5 means fewer than 50% unique values → suggest category.
+    check_datetimes : bool, default True
+        Attempt to detect datetime-parseable strings in object columns.
+        Samples up to 200 rows to avoid scanning very large columns.
+
+    Returns
+    -------
+    MemoryReport
+        Structured report with per-column diagnostics. Supports:
+        - ``report.to_dataframe()``  — machine-readable table
+        - ``report.apply(df)``       — apply all suggestions, returns new df
+        - ``report.actionable``      — list of columns with suggestions
+        - ``report.high_impact``     — columns with >= 50% savings potential
+    """
+
+### Alternative Solutions
+
+df.info(memory_usage='deep'). This is the closest native.But no guidance on how to fix it.
+
+### Additional Context
+
+Design Decisions
+Zero side effects. memory_report() never modifies the DataFrame.
+Applying suggestions is always an explicit opt-in via report.apply(df).
+Safe-only suggestions. Every suggestion is lossless by default:
+
+Integer downcasts are validated against actual min/max values
+Float32 suggestions are validated: values are cast to float32 and checked
+for overflow before recommending
+apply() wraps each conversion in a try/except and warns on failure —
+it never raises
+
+Null awareness. The report flags columns with nulls so users know
+before applying dtype changes that may affect null representation.
+Overflow guard for floats. The implementation detects when a finite
+float64 value would become ±inf after float32 cast, and keeps float64.
+Composable return type. Returning a MemoryReport rather than just
+printing means the output is usable in notebooks, CI pipelines, and
+data quality checks.
+ENH: Simplify reading vertically stacked CSV tables
+### Feature Type
+
+- [x] Adding new functionality to pandas
+
+- [x] Changing existing functionality in pandas
+
+- [ ] Removing existing functionality in pandas
+
+
+### Problem Description
+
+The overall goal is reading vertically stacked CSV files, with multiple tables.
+There is no difficulty in writing such a file with pandas (just append) or reading and splitting horizontally stacked CSV files (but they can be inefficient and more complicated to write).
+This is not technically a CSV format (according to RFC 4180, since column sizes differ) but a very slight generalisation of it.
+It doesn't really have a name, but has been re-invented several times, with different ways of determining where to split the table.
+
+I think the only form that really needs supporting are known specified lines, e.g. [[''], ['Col1', 'Col2']] would split on blank rows but also on Col1,Col2 rows. I had considered "when the number of columns changes", but I think that's a strictly less useful format (you can't have multiple tables with the same number of columns consecutively), and it could be extended in later if wanted.
+
+### Feature Description
+
+Possible solutions I can think of (any one of the following):
+#### A) Part of TextFileReader chunking
+   
+   This would require the ability to reset the columns state of the reader (either by the user or as part of the implementation).
+   If that is easy to do, then this might be the most straightforward way of implementing this feature.
+
+   The simplest way of doing this is adding an option chunk_on = None, which can be set to a list of row values (permitted to include the blank row).
+   Importantly the presence of this does not just cause the chunks to be broken off but also the number, header, names and types of columns to be reset (if not specified as a parameter) as if reading a new file. (But it does not reset if chunking because of chunksize, so the two are compatible.)
+
+   If skip_blank_lines is True, then blank lines can end (if [''] is in chunk_on) but not begin or contribute to a chunk.
+   I.e. consecutive skipped blank lines do not lead to 1x1 NA chunks, do not lead to 1x1 NAs before EOF or before other chunk_on rows, and do not lead to 1xN NA rows in previous or following chunks.
+ 
+
+   If skip_blank_lines is False, then a blank line is interpreted as a row [''] and behaves the same as any other row (perhaps aside from NA conversion).
+   If skip_blank_lines is True and [''] is not in chunk_on, then it is as if reading the file without blank lines in.
+   (This should be the same as currently, aside from the new parameter cases.)
+
+   Usage would look something like this
+   ```CSV
+   X,Y
+   1,2
+   3,4
+   A,B,C
+   x,y,3
+   u,v,2
+   ```
+
+   ```Python
+   xy = ['X', 'Y']
+   abc = ['A', 'B', 'C']
+   tables = {}
+
+   for chunk in pd.read_csv(…, iterator=True, chunk_on = [xy, abc]):
+       # header row 
+       key = list(chunk.columns)
+       # I don't actually know if omitting chunksize but keeping iterator leads to some implicit chunking.
+       # If it doesn't then this can be simpler, not saying that it should though.
+       # Also this example would concatenate repeated heading tables (but that's not a limitation of the interface)
+       stored = tables.setdefault(key, chunk)
+       if stored is not chunk:
+           tables[key] = pd.concat(stored, chunk, ignore_index = True)
+
+   >>> tables[xy]
+      X  Y # int, int
+   0  1  2
+   1  3  4
+
+   >>> tables[abc]
+      A  B  C # str, str, int
+   0  x  y  3
+   1  u  v  2
+   ```
+
+
+#### B) Implement a function to directly read vertically stacked CSV (or an parameter read_csv is overloaded with).
+   This is the simplest and fastest from the user's perspective but possibly the least convenient to implement, and raises many questions about the interface. This could return an iterable (forward compatible if changed to some object type) of the distinct tables.
+
+   One option that might not cost much in terms of implementation is to convert the existing read_csv implementation to work on a stack (via growing array) of the states it currently uses one of. Everything works mostly the same (with the new additions e.g. new header rows) but on the state at the top of the stack.  If splitting is not permitted (read_csv) then nothing new is ever pushed to the stack (beyond the first element). When a split is identified, it simply pushes a new state to the stack and works on that.
+
+#### C) Based on the skiprows/nrows approach: implement a way of reading this data from the file somehow, so that the file can then be read again several times for each table.
+   This is bad for performance because it multiplies IO operations. Also the interface is a bit questionable and specific (e.g. if split by known headers - does it take a list of them and generate a new column indexing it?). Basically a much worse version of A.
+
+#### D) Improve the post-processing of the merged file
+   This might be easier to implement than A and could be more generically useful, but is going off the path a bit and has some corner cases.
+
+   This would probably involve:
+   A splitting operation (which would involve the processing steps 1, 2 & optionally 5 since you might want to keep the index in some cases)
+   One or more operations for re-interpreting the table with the first row as headers, newly inferred dtypes, removal of columns (covering processing steps 3, 4, 6)
+
+### Alternative Solutions
+
+There are several possible approaches for reading the file today (but then splitting and processing is where it gets complex):
+A) read_csv with header=None and names=range(N) where N >= the number of columns in each table. An upper bound on N has to be known in advance.
+B) Multiple read_csv calls with skiprows and nrows. This requires knowing the split indices in advance.
+C) Use the standard library csv module and put the results into one or more dataframes (either splitting there or later).
+   This doesn't have many of the niceties of pandas' read_csv including performance, but 
+
+If splitting with pandas (there is probably room for improvement here as I am only a beginner with pandas):
+1. Use df.groupby(<df condition>.cumsum()) to split on splitting rows
+2. Optionally (depending on the type of splitter), remove splitting rows and empty group items (or replace multiple empty groups with one)
+3. If there are header rows
+   a) Set each df's columns to the first row
+   b) Drop the header row
+   c) Unset the column name on the df
+4. Remove columns that should not be present.
+   If splitting by known column counts or names then keep only those e.g. df[['col1', 'col2']].
+   If splitting by blank rows or knxown lines the best approach is probably to remove all-NA columns (technically though it could still be a valid column that just happens to be all NA)
+5. Reset all indexes with drop=True
+6. If you know the types of the data, convert them all.
+   If you don't, then you are out of luck, and must leave them as strings or use a series of try-catches on each element with conversion operations to guess a type.
+   Possibly you would have to set the NA parameters so that a present column is never treated as NaN (might not work for float NaN)
+
+As you can see this is quite involved and somewhat error prone.
+Arguably the reason for all this complexity is because it was not a very well defined data frame to begin with.
+It would be nice if some or all of this process could be simplified.
+
+
+### Additional Context
+
+Related: https://github.com/pandas-dev/pandas/issues/53433.
+
+As mentioned in the related issue, this is not a good format for long-term or professional storage.
+I think it is worth supporting to some degree because people have mentioned needing to read this format several times - not just the related issue, but there are some examples on stackoverflow, and the documentation https://pandas.pydata.org/pandas-docs/stable/user_guide/cookbook.html#cookbook-csv-multiple-files link "read_csv in action" FAQ for multiple tables says:
+"If the file structure is complex, you might need to pre-process the file or use additional libraries to extract the specific table. Pandas alone may not directly handle complex multi-table CSV files."
+It would be good if pandas just supported this use case directly or more easily.
+
+I do believe it has its own niche for short-term, informal and internal data where the schema is implicit (whatever data I happen to be dumping).
+The use case I have is testing information from a language that isn't Python.
+Reaching for HDF or SQL here is extremely heavy handed (dependencies, file/dataset setup) and unnecessary while CSV is a very natural and convenient human readable format, requiring no dependencies.
+(Because I can just write out the format myself, without having to think about the binary layout.)
+
+I have a couple of very big tables (proper CSV files), and then several small tables (often metadata).
+I don't really want to have a single CSV file for each very small table (which probably isn't very efficient in terms of IO operations, and is more files to manage).
+ENH: Introduce SECURITY.md
+See the GitHub doc for details. Part of the GitHub Secure Open Source Fund
+Project.
+
+https://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/configure-vulnerability-reporting/adding-a-security-policy-to-your-repository
+BUG: read_parquet fails with tz aware data
+### Pandas version checks
+
+- [x] I have checked that this issue has not already been reported.
+
+- [x] I have confirmed this bug exists on the [latest version](https://pandas.pydata.org/docs/whatsnew/index.html) of pandas.
+
+- [x] I have confirmed this bug exists on the [main branch](https://pandas.pydata.org/docs/dev/getting_started/install.html#installing-the-development-version-of-pandas) of pandas.
+
+
+### Reproducible Example
+
+```python
+import pandas as pd
+
+# Create datetime ranges
+date_range_naive = pd.date_range(start='2024-01-01', periods=5, freq='D')
+date_range_aware = pd.date_range(start='2024-01-01', periods=5, freq='D', tz='Europe/Berlin')
+
+# Create DataFrames
+df_naive = pd.DataFrame({
+    'value': range(5)
+}, index=date_range_naive)
+
+df_aware = pd.DataFrame({
+    'value': range(5, 10)
+}, index=date_range_aware)
+
+
+df_naive.to_parquet('df_naive.parquet')
+df_aware.to_parquet('df_aware.parquet')
+
+# Read DataFrames back from Parquet files
+df_naive_read = pd.read_parquet('df_naive.parquet')
+df_aware_read = pd.read_parquet('df_aware.parquet')
+```
+
+### Issue Description
+
+Loading data with tz aware Datetime Index from parquet seems to fail. I have a lot of data saved this way with pandas 2.x where loading does work. Using pandas 3, loading fails. Same goes for data newly created. Writing completes, reading fails. See Sample above yields
+`AttributeError: 'NoneType' object has no attribute 'timezone'`
+
+### Expected Behavior
+
+Read in dataframe the same manner as it was written, especially with a tz aware `DateTimeIndex`
+
+### Installed Versions
+
+<details>
+
+```
+INSTALLED VERSIONS
+------------------
+commit                : ab90747e3dae0e69b1bdbf083820b8075689b34b
+python                : 3.11.11
+python-bits           : 64
+OS                    : Windows
+OS-release            : 10
+Version               : 10.0.26100
+machine               : AMD64
+processor             : Intel64 Family 6 Model 140 Stepping 1, GenuineIntel
+byteorder             : little
+LC_ALL                : None
+LANG                  : en
+LOCALE                : de_DE.cp1252
+
+pandas                : 3.0.2
+numpy                 : 2.3.4
+dateutil              : 2.9.0.post0
+pip                   : 24.3.1
+Cython                : None
+sphinx                : 8.1.3
+IPython               : 8.31.0
+adbc-driver-postgresql: None
+adbc-driver-sqlite    : None
+bs4                   : 4.12.3
+bottleneck            : None
+fastparquet           : 2026.3.0
+fsspec                : 2026.3.0
+html5lib              : None
+hypothesis            : None
+gcsfs                 : None
+jinja2                : 3.1.5
+lxml.etree            : 5.3.0
+matplotlib            : 3.10.0
+numba                 : 0.62.1
+numexpr               : 2.10.2
+odfpy                 : None
+openpyxl              : 3.1.5
+psycopg2              : None
+pymysql               : None
+pyarrow               : 18.1.0
+pyiceberg             : None
+pyreadstat            : None
+pytest                : None
+python-calamine       : None
+pytz                  : None
+pyxlsb                : None
+s3fs                  : None
+scipy                 : 1.15.1
+sqlalchemy            : None
+tables                : None
+tabulate              : 0.9.0
+xarray                : None
+xlrd                  : 2.0.1
+xlsxwriter            : 3.2.0
+zstandard             : 0.23.0
+qtpy                  : 2.4.2
+pyqt5                 : None
+```
+
+</details>
+BUG: `na_rep=""` in `DataFrame.to_csv` not applied consistently
+### Pandas version checks
+
+- [x] I have checked that this issue has not already been reported.
+
+- [x] I have confirmed this bug exists on the [latest version](https://pandas.pydata.org/docs/whatsnew/index.html) of pandas.
+
+- [x] I have confirmed this bug exists on the [main branch](https://pandas.pydata.org/docs/dev/getting_started/install.html#installing-the-development-version-of-pandas) of pandas.
+
+
+### Reproducible Example
+
+```python
+import pandas as pd
+
+pd.__version__
+# '3.1.0.dev0+575.ge3ae055ab2'
+
+df = pd.DataFrame({"a": [1, 2, None, 3]}, index=[1, 2, 3, 4])
+
+# This works as expected
+print(df.to_csv(na_rep=""))
+# ,a
+# 1,1.0
+# 2,2.0
+# 3,
+# 4,3.0
+
+# na_rep is ignored if `index=False`
+print(df.to_csv(na_rep="", index=False))
+# a
+# 1.0
+# 2.0
+# ""
+# 3.0
+```
+
+### Issue Description
+
+When using `to_csv` with `index=False`, the `na_rep` argument gets ignored in the output, and instead NaNs are rendered as `""`.
+
+### Expected Behavior
+
+Expect that `na_rep=""` would work regardless of `index` setting.
+
+### Installed Versions
+
+<details>
+
+INSTALLED VERSIONS
+------------------
+commit                : e3ae055ab220f9ca9836b3229374cafc46397c18
+python                : 3.12.7
+python-bits           : 64
+OS                    : Linux
+OS-release            : 6.6.84.1-microsoft-standard-WSL2
+Version               : #1 SMP PREEMPT_DYNAMIC Tue Apr  1 19:37:06 UTC 2025
+machine               : x86_64
+processor             : x86_64
+byteorder             : little
+LC_ALL                : None
+LANG                  : C.UTF-8
+LOCALE                : C.UTF-8
+
+pandas                : 3.1.0.dev0+575.ge3ae055ab2
+numpy                 : 2.5.0.dev0+git20260330.f91c8a8
+dateutil              : 2.9.0.post0
+pip                   : None
+Cython                : None
+sphinx                : None
+IPython               : None
+adbc-driver-postgresql: None
+adbc-driver-sqlite    : None
+bs4                   : None
+bottleneck            : None
+fastparquet           : None
+fsspec                : None
+html5lib              : None
+hypothesis            : None
+gcsfs                 : None
+jinja2                : None
+lxml.etree            : None
+matplotlib            : None
+numba                 : None
+numexpr               : None
+odfpy                 : None
+openpyxl              : None
+psycopg2              : None
+pymysql               : None
+pyarrow               : None
+pyiceberg             : None
+pyreadstat            : None
+pytest                : None
+python-calamine       : None
+pytz                  : None
+pyxlsb                : None
+s3fs                  : None
+scipy                 : None
+sqlalchemy            : None
+tables                : None
+tabulate              : None
+xarray                : None
+xlrd                  : None
+xlsxwriter            : None
+zstandard             : None
+qtpy                  : None
+pyqt5                 : None
+</details>
+BUG: `GroupBy.any()`/`all()` on NumPy `bool` columns return `NaN` for empty groups and upcast to `float64` instead of `bool`
+### Pandas version checks
+
+- [x] I have checked that this issue has not already been reported.
+
+- [x] I have confirmed this bug exists on the [latest version](https://pandas.pydata.org/docs/whatsnew/index.html) of pandas.
+
+- [x] I have confirmed this bug exists on the [main branch](https://pandas.pydata.org/docs/dev/getting_started/install.html#installing-the-development-version-of-pandas) of pandas.
+
+
+### Reproducible Example
+
+```python
+import pandas as pd
+import numpy as np
+
+df = pd.DataFrame({
+    "group": pd.Categorical(["A", "B"], categories=["A", "B", "C"]),
+    "flag": np.array([True, False], dtype=bool),
+})
+
+result = df.groupby("group", observed=False)["flag"].any()
+print(result)
+
+
+## Out
+
+
+group
+A    1.0
+B    0.0
+C    NaN
+Name: flag, dtype: float64
+```
+
+### Issue Description
+
+`GroupBy.any()` and `GroupBy.all()` on NumPy `bool` columns return `float64` with `NaN` for empty groups instead of `bool` with `False`/`True`. This looks like a regression on current `main` introduced by the `max`/`min` fast-path that was recently added. 
+
+Also, This is not in latest release, however it would impact users once 3.1.0 is out ( currently on main ) 
+
+### Expected Behavior
+
+`groupby().any()` and `groupby().all()` should return `bool` dtype with `False`/`True` for empty groups. For the above repro we should get this as output. 
+
+```
+group
+A     True
+B    False
+C    False
+Name: flag, dtype: bool
+```
+
+### Installed Versions
+
+<details>
+
+INSTALLED VERSIONS
+------------------
+commit                : 2a7587fed01e1b7d523d59281b92e1a32a20fd9e
+python                : 3.12.12
+python-bits           : 64
+OS                    : Windows
+OS-release            : 11
+Version               : 10.0.26200
+machine               : AMD64
+processor             : Intel64 Family 6 Model 183 Stepping 1, GenuineIntel
+byteorder             : little
+LC_ALL                : None
+LANG                  : None
+LOCALE                : English_United States.1252
+
+pandas                : 3.1.0.dev0+526.g2a7587fed0.dirty
+numpy                 : 2.4.2
+dateutil              : 2.9.0.post0
+pip                   : 26.0.1
+Cython                : 3.2.4
+sphinx                : None
+IPython               : 9.10.0
+adbc-driver-postgresql: None
+adbc-driver-sqlite    : None
+bs4                   : None
+bottleneck            : 1.6.0
+fastparquet           : None
+fsspec                : None
+html5lib              : None
+hypothesis            : 6.151.6
+gcsfs                 : None
+jinja2                : None
+lxml.etree            : None
+matplotlib            : 3.10.8
+numba                 : None
+numexpr               : 2.14.1
+odfpy                 : None
+openpyxl              : None
+psycopg2              : None
+pymysql               : None
+pyarrow               : None
+pyiceberg             : None
+pyreadstat            : None
+pytest                : 9.0.2
+python-calamine       : None
+pytz                  : 2025.2
+pyxlsb                : None
+s3fs                  : None
+scipy                 : 1.17.0
+sqlalchemy            : 2.0.46
+tables                : None
+tabulate              : 0.9.0
+xarray                : None
+xlrd                  : None
+xlsxwriter            : None
+zstandard             : None
+qtpy                  : None
+pyqt5                 : None
+
+</details>
+BUG: `groupby(..., as_index=False)[col].ohlc()` returns group keys in the index
+### Pandas version checks
+
+- [x] I have checked that this issue has not already been reported.
+
+- [x] I have confirmed this bug exists on the [latest version](https://pandas.pydata.org/docs/whatsnew/index.html) of pandas.
+
+- [x] I have confirmed this bug exists on the [main branch](https://pandas.pydata.org/docs/dev/getting_started/install.html#installing-the-development-version-of-pandas) of pandas.
+
+
+### Reproducible Example
+
+``` python
+import pandas as pd
+
+df = pd.DataFrame({
+    "key": ["A", "A", "B", "B"],
+    "price": [1.0, 2.0, 3.0, 4.0],
+})
+
+result = df.groupby("key", as_index=False)["price"].ohlc()
+
+print(result)
+print()
+print("Index:", result.index.tolist())
+print("Columns:", result.columns.tolist())
+```
+
+### Issue Description
+
+`df.groupby("key", as_index=False)["col"].ohlc()` ignores `as_index=False`: the group key is returned in the index instead of as a column. Other aggregations such as `sum`, `mean`, `min`, and `max` correctly honor `as_index=False`.
+
+### Expected Behavior
+
+with `as_index=False`, the group key should be returned as a column.
+
+### Installed Versions
+
+<details>
+
+INSTALLED VERSIONS
+------------------
+commit                : 2a7587fed01e1b7d523d59281b92e1a32a20fd9e
+python                : 3.12.12
+python-bits           : 64
+OS                    : Windows
+OS-release            : 11
+Version               : 10.0.26200
+machine               : AMD64
+processor             : Intel64 Family 6 Model 183 Stepping 1, GenuineIntel
+byteorder             : little
+LC_ALL                : None
+LANG                  : None
+LOCALE                : English_United States.1252
+
+pandas                : 3.1.0.dev0+526.g2a7587fed0.dirty
+numpy                 : 2.4.2
+dateutil              : 2.9.0.post0
+pip                   : 26.0.1
+Cython                : 3.2.4
+sphinx                : None
+IPython               : 9.10.0
+adbc-driver-postgresql: None
+adbc-driver-sqlite    : None
+bs4                   : None
+bottleneck            : 1.6.0
+fastparquet           : None
+fsspec                : None
+html5lib              : None
+hypothesis            : 6.151.6
+gcsfs                 : None
+jinja2                : None
+lxml.etree            : None
+matplotlib            : 3.10.8
+numba                 : None
+numexpr               : 2.14.1
+odfpy                 : None
+openpyxl              : None
+psycopg2              : None
+pymysql               : None
+pyarrow               : None
+pyiceberg             : None
+pyreadstat            : None
+pytest                : 9.0.2
+python-calamine       : None
+pytz                  : 2025.2
+pyxlsb                : None
+s3fs                  : None
+scipy                 : 1.17.0
+sqlalchemy            : 2.0.46
+tables                : None
+tabulate              : 0.9.0
+xarray                : None
+xlrd                  : None
+xlsxwriter            : None
+zstandard             : None
+qtpy                  : None
+pyqt5                 : None
+</details>
+BUG: pd.to_timedelta ignores unit value for certain float values
+### Pandas version checks
+
+- [x] I have checked that this issue has not already been reported.
+
+- [x] I have confirmed this bug exists on the [latest version](https://pandas.pydata.org/docs/whatsnew/index.html) of pandas.
+
+- [ ] I have confirmed this bug exists on the [main branch](https://pandas.pydata.org/docs/dev/getting_started/install.html#installing-the-development-version-of-pandas) of pandas.
+
+
+### Reproducible Example
+
+```python
+import pandas as pd
+pd.to_timedelta([1.0, 1.01], unit="s")
+```
+
+### Issue Description
+
+`pd.to_timedelta()` does ignore the unit argument in certain cases.
+
+For the example above we get in `pandas<3.0`:
+
+```
+TimedeltaIndex(['0 days 00:00:01', '0 days 00:00:01.010000'], dtype='timedelta64[ns]', freq=None)
+```
+
+but starting with `pandas>=3.0` we get:
+
+```
+TimedeltaIndex(['0 days 00:00:00.000000001', '0 days 00:00:01.010000'], dtype='timedelta64[ns]', freq=None)
+```
+
+It does not happen when providing a `numpy` array as input:
+
+```python
+>>> pd.to_timedelta(np.array([1.0, 1.01]), unit="s")
+TimedeltaIndex(['0 days 00:00:01', '0 days 00:00:01.010000'], dtype='timedelta64[ns]', freq=None)
+```
+
+Most likely it was introduced by #63533 
+
+### Expected Behavior
+
+It should return
+
+```
+TimedeltaIndex(['0 days 00:00:01', '0 days 00:00:01.010000'], dtype='timedelta64[ns]', freq=None)
+```
+
+### Installed Versions
+
+<details>
+
+INSTALLED VERSIONS          
+------------------          
+commit                : ab90747e3dae0e69b1bdbf083820b8075689b34b
+python                : 3.14.3
+python-bits           : 64  
+OS                    : Linux
+OS-release            : 6.8.0-106-generic
+Version               : #106~22.04.1-Ubuntu SMP PREEMPT_DYNAMIC Fri Mar  6 08:44:59 UTC  
+machine               : x86_64
+processor             : x86_64
+byteorder             : little
+LC_ALL                : None
+LANG                  : en_GB.UTF-8
+LOCALE                : en_GB.UTF-8
+                                           
+pandas                : 3.0.2
+numpy                 : 2.4.4
+dateutil              : 2.9.0.post0
+pip                   : None
+Cython                : None
+sphinx                : None
+IPython               : 9.12.0
+adbc-driver-postgresql: None
+adbc-driver-sqlite    : None
+bs4                   : None
+bottleneck            : None
+fastparquet           : None
+fsspec                : None
+html5lib              : None
+hypothesis            : None
+gcsfs                 : None
+jinja2                : None
+lxml.etree            : None
+matplotlib            : None
+numba                 : None
+numexpr               : None
+odfpy                 : None
+openpyxl              : None
+psycopg2              : None
+pymysql               : None
+pyarrow               : None
+pyiceberg             : None
+pyreadstat            : None
+pytest                : None
+python-calamine       : None
+pytz                  : None
+pyxlsb                : None
+s3fs                  : None
+scipy                 : None
+sqlalchemy            : None
+tables                : None
+tabulate              : None
+xarray                : None
+xlrd                  : None
+xlsxwriter            : None
+zstandard             : None
+qtpy                  : None
+pyqt5                 : None
+
+
+</details>
+API: Index.take discards fill_value and raises unnecessarily
+`Index.take` has two bugs when `allow_fill=True` and `fill_value` is passed explicitly:
+
+### 1. `fill_value` is silently discarded
+
+The caller's `fill_value` is ignored; `self._na_value` is always substituted:
+
+```python
+# Note: we discard fill_value and use self._na_value, only relevant
+#  in the case where allow_fill is True and fill_value is not None
+taken = algos.take(
+    values, indices, allow_fill=allow_fill, fill_value=self._na_value
+)
+```
+
+### 2. `_can_hold_na` gate raises on integer dtypes
+
+```python
+>>> pd.Index([1, 2, 3]).take([0, -1], allow_fill=True, fill_value=99)
+ValueError: Unable to fill values because Index cannot contain NA
+```
+
+The caller provided a valid fill value that the dtype can hold, but `Index.take` rejects it because `_can_hold_na` is False for integer dtypes.
+
+### Consequences
+
+These force internal callers to bypass `Index.take` and work on the underlying arrays directly:
+
+- **`frame.py` idxmin/idxmax**: `algorithms.take(index._values, ...)` instead of `index.take(...)`
+- **`reshape/merge.py`**: appends a sentinel value to the index, with a comment: *"We do not use allow_fill and fill_value because it throws a ValueError on integer indices"*
+- **`indexes/base.py` reset_index**: take-then-putmask as two operations
+- **`io/formats/excel.py`**: guards `allow_fill` on `levels._can_hold_na`
+- **`indexes/multi.py`**: `algos.take_nd(lev._values, ...)` instead of `lev.take(...)`
+
+### Proposed fix
+
+- Respect the caller's `fill_value`
+- Remove the `_can_hold_na` gate (let the underlying array handle type promotion)
+- Simplify the workaround sites
+
+This is backward-compatible: the existing gate (`allow_fill=True` + `fill_value is None` → numpy-style take) is preserved, so bare `idx.take(indices)` is unchanged.
+
+Separately, there are questions about the right long-term defaults for `allow_fill` (currently `True` for backward compat but arguably should be `False` to match `ExtensionArray.take`), but that would require a deprecation cycle and is out of scope here.
+BUG: `DataFrame.agg([...], numeric_only=True)` returns `NaN` for non-numeric columns instead of excluding them
+### Pandas version checks
+
+- [x] I have checked that this issue has not already been reported.
+
+- [x] I have confirmed this bug exists on the [latest version](https://pandas.pydata.org/docs/whatsnew/index.html) of pandas.
+
+- [x] I have confirmed this bug exists on the [main branch](https://pandas.pydata.org/docs/dev/getting_started/install.html#installing-the-development-version-of-pandas) of pandas.
+
+
+### Reproducible Example
+
+```python
+import pandas as pd
+
+df = pd.DataFrame({
+      "A": [1, 2, 3],
+      "B": [1.0, 2.0, 3.0],
+      "C": ["foo", "bar", "baz"], })
+
+result = df.agg(["sum", "mean"], numeric_only=True)
+print(result)
+```
+
+### Issue Description
+
+`DataFrame.agg([...], numeric_only=True)` returns `NaN` for non-numeric columns instead of excluding them. This affects `DataFrame.agg` with a list of string reduction names and `numeric_only=True`, including reductions such as `sum`, `mean`, `std`, `var`, `sem`, `median`, `prod`, `min`, and `max`, on DataFrames with non-numeric columns such as `object`, `datetime64[ns]`, `timedelta64[ns]`, `StringDtype`, `CategoricalDtype`, and `DatetimeTZDtype`.
+
+
+### Expected Behavior
+
+Non-numeric columns should be excluded from the result when `DataFrame.agg([...], numeric_only=True)` is used, rather than being included as all `NaN`.
+
+
+### Installed Versions
+
+<details>
+
+
+INSTALLED VERSIONS
+------------------
+commit                : 2a7587fed01e1b7d523d59281b92e1a32a20fd9e
+python                : 3.12.12
+python-bits           : 64
+OS                    : Windows
+OS-release            : 11
+Version               : 10.0.26200
+machine               : AMD64
+processor             : Intel64 Family 6 Model 183 Stepping 1, GenuineIntel
+byteorder             : little
+LC_ALL                : None
+LANG                  : None
+LOCALE                : English_United States.1252
+
+pandas                : 3.1.0.dev0+526.g2a7587fed0.dirty
+numpy                 : 2.4.2
+dateutil              : 2.9.0.post0
+pip                   : 26.0.1
+Cython                : 3.2.4
+sphinx                : None
+IPython               : 9.10.0
+adbc-driver-postgresql: None
+adbc-driver-sqlite    : None
+bs4                   : None
+bottleneck            : 1.6.0
+fastparquet           : None
+fsspec                : None
+html5lib              : None
+hypothesis            : 6.151.6
+gcsfs                 : None
+jinja2                : None
+lxml.etree            : None
+matplotlib            : 3.10.8
+numba                 : None
+numexpr               : 2.14.1
+odfpy                 : None
+openpyxl              : None
+psycopg2              : None
+pymysql               : None
+pyarrow               : None
+pyiceberg             : None
+pyreadstat            : None
+pytest                : 9.0.2
+python-calamine       : None
+pytz                  : 2025.2
+pyxlsb                : None
+s3fs                  : None
+scipy                 : 1.17.0
+sqlalchemy            : 2.0.46
+tables                : None
+tabulate              : 0.9.0
+xarray                : None
+xlrd                  : None
+xlsxwriter            : None
+zstandard             : None
+qtpy                  : None
+pyqt5                 : None
+
+</details>
+BUG: `operation 'add' not supported for dtype 'string[pyarrow]' with dtype 'str'`
+### Pandas version checks
+
+- [x] I have checked that this issue has not already been reported.
+
+- [x] I have confirmed this bug exists on the [latest version](https://pandas.pydata.org/docs/whatsnew/index.html) of pandas.
+
+- [x] I have confirmed this bug exists on the [main branch](https://pandas.pydata.org/docs/dev/getting_started/install.html#installing-the-development-version-of-pandas) of pandas.
+
+
+### Reproducible Example
+
+```python
+import pandas as pd
+
+df = pd.DataFrame({'a': ['foo', 'bar']}).convert_dtypes(dtype_backend='pyarrow')
+df['b'] = '!'
+print(df.dtypes)
+df['a'] + df['b']
+```
+
+### Issue Description
+
+This raises
+```py
+operation 'add' not supported for dtype 'string[pyarrow]' with dtype 'str'
+```
+
+### Expected Behavior
+
+```
+0    foo!
+1    bar!
+dtype: str
+```
+
+### Installed Versions
+
+<details>
+
+INSTALLED VERSIONS
+------------------
+commit                : b061a197f1d9b598b6852472a36ececac370d510
+python                : 3.12.5
+python-bits           : 64
+OS                    : Linux
+OS-release            : 6.6.87.2-microsoft-standard-WSL2
+Version               : #1 SMP PREEMPT_DYNAMIC Thu Jun  5 18:30:46 UTC 2025
+machine               : x86_64
+processor             : x86_64
+byteorder             : little
+LC_ALL                : None
+LANG                  : C.UTF-8
+LOCALE                : C.UTF-8
+
+pandas                : 3.1.0.dev0+700.gb061a197f1
+numpy                 : 2.5.0.dev0+git20260303.694cbb6
+dateutil              : 2.9.0.post0
+pip                   : 25.0.1
+Cython                : 3.2.4
+sphinx                : None
+IPython               : 9.10.0
+adbc-driver-postgresql: None
+adbc-driver-sqlite    : None
+bs4                   : 4.14.3
+bottleneck            : None
+fastparquet           : None
+fsspec                : 2025.10.0
+html5lib              : None
+hypothesis            : None
+gcsfs                 : 2025.2.0
+jinja2                : 3.1.6
+lxml.etree            : None
+matplotlib            : 3.10.7
+numba                 : None
+numexpr               : None
+odfpy                 : None
+openpyxl              : None
+psycopg2              : None
+pymysql               : None
+pyarrow               : 23.0.1
+pyiceberg             : None
+pyreadstat            : None
+pytest                : None
+python-calamine       : None
+pytz                  : 2025.2
+pyxlsb                : None
+s3fs                  : None
+scipy                 : 1.16.0
+sqlalchemy            : None
+tables                : None
+tabulate              : 0.9.0
+xarray                : None
+xlrd                  : None
+xlsxwriter            : None
+zstandard             : None
+qtpy                  : None
+pyqt5                 : None
+
+</details>
+DOC: Clarify Series index alignment in DataFrame.assign
+### Pandas version checks
+
+- [x] I have checked that the issue still exists on the latest versions of the docs on `main` [here](https://pandas.pydata.org/docs/dev/)
+
+
+### Location of the documentation
+
+https://pandas.pydata.org/docs/reference/api/pandas.DataFrame.assign.html
+
+### Documentation problem
+
+The current `DataFrame.assign()` documentation states that non-callable values such as a Series, scalar, or array are "simply assigned." However, it does not clearly explain that when a Series is passed, values are aligned by index labels rather than by position.
+
+This behavior may be surprising to users, especially when compared to list or ndarray assignment, which is positional.
+
+### Suggested fix for documentation
+
+Add a short clarification and example demonstrating that:
+
+- Series values are aligned by index labels
+- Missing labels result in NaN values
+- List/ndarray values are assigned positionally
+DOC: Typo in the webpage docs/getting_started/intro_tutorials/09_timeseries.html
+### Pandas version checks
+
+- [x] I have checked that the issue still exists on the latest versions of the docs on `main` [here](https://pandas.pydata.org/docs/dev/)
+
+
+### Location of the documentation
+
+1. https://pandas.pydata.org/docs/getting_started/intro_tutorials/09_timeseries.html
+2. https://pandas.pydata.org/docs/dev/getting_started/intro_tutorials/09_timeseries.html#min-tut-09-timeseries
+
+
+### Documentation problem
+
+Typo: As shown in the red rectangles. It should be "us" instead of "ns". 
+
+<img width="1322" height="1079" alt="Image" src="https://github.com/user-attachments/assets/f64da97f-7938-4d9d-9d02-1001d15a2de8" />
+
+### Suggested fix for documentation
+
+Just modified the typo.
+PERF: DataFrame row-wise .loc assignment is much slower with string_storage="pyarrow" than "python"
+### Pandas version checks
+
+- [x] I have checked that this issue has not already been reported.
+
+- [x] I have confirmed this bug exists on the [latest version](https://pandas.pydata.org/docs/whatsnew/index.html) of pandas.
+
+- [] I have confirmed this bug exists on the [main branch](https://pandas.pydata.org/docs/dev/getting_started/install.html#installing-the-development-version-of-pandas) of pandas.
+
+
+### Reproducible Example
+
+```python
+import time
+
+import pandas as pd
+import pyarrow as pa
+
+
+def bench(storage: str, rows: int = 1000, cols: int = 20) -> float:
+    pd.options.mode.string_storage = storage
+
+    source = pd.DataFrame(
+        [[f"v{j % 10}" for j in range(cols)] for _ in range(rows)]
+    ).astype(str)
+    out = pd.DataFrame(columns=source.columns).astype(str)
+
+    start = time.perf_counter()
+    for i, row in enumerate(source.itertuples(index=False)):
+        out.loc[i] = row
+    return time.perf_counter() - start
+
+
+print(f"pandas={pd.__version__} pyarrow={pa.__version__}")
+for storage in ("python", "pyarrow"):
+    elapsed = bench(storage)
+    print(storage, elapsed)
+```
+
+### Issue Description
+
+I mentioned this to the arrow devs as well: https://github.com/apache/arrow/issues/49612
+
+`pd.options.mode.string_storage = "pyarrow"` causes a large slowdown when repeatedly growing a string-typed `DataFrame` with `loc` row assignment.
+
+The performance issue largely goes away if I switch to:
+
+```python
+pd.options.mode.string_storage = "python"
+```
+
+### Expected Behavior
+
+
+```text
+pandas=3.0.1 pyarrow=23.0.1 rows=1000 cols=20
+storage=python  array=StringArray       seconds=0.420
+storage=pyarrow array=ArrowStringArray  seconds=3.316
+slowdown(pyarrow/python)=7.89x
+```
+
+I also see the same pattern with smaller sizes, for example:
+
+```text
+500x10:  python=0.147s  pyarrow=0.508s
+500x20:  python=0.200s  pyarrow=0.930s
+1000x10: python=0.292s  pyarrow=1.759s
+1000x20: python=0.411s  pyarrow=3.358s
+1500x20: python=0.624s  pyarrow=7.174s
+```
+
+### Installed Versions
+
+```text
+pandas=3.0.1
+pyarrow=23.0.1
+python=3.12
+platform=Linux
+```
+PERF: Specify `how` when calling `merge._factorize_keys` when possible
+Ref: https://github.com/pandas-dev/pandas/pull/64691#discussion_r3067005532
+
+In addition to the two methods identified in the above comment, other calls should be investigated as well.
+BUILD: meson.build fails in Pandas 2.3.1 as of earlier today due to meson 1.11 update
+### Installation check
+
+- [x] I have read the [installation guide](https://pandas.pydata.org/pandas-docs/stable/getting_started/install.html#installing-pandas).
+
+
+### Platform
+
+Linux-5.15.0-1084-aws-x86_64-with-glibc2.31
+
+### Installation Method
+
+pip install
+
+### pandas Version
+
+2.3.1
+
+### Python Version
+
+cpython 3.14.3
+
+### Installation Logs
+
+<details>
+
+../pandas/_libs/tslibs/meson.build:32:7: ERROR: python.extension_module keyword argument 'dependencies' was of type array[str] but should have been array[Dependency | InternalDependency]
+
+</details>
+BUG: 1-element pd.NA boolean arrays are all() but not any()
+### Pandas version checks
+
+- [x] I have checked that this issue has not already been reported.
+
+- [x] I have confirmed this bug exists on the [latest version](https://pandas.pydata.org/docs/whatsnew/index.html) of pandas.
+
+- [ ] I have confirmed this bug exists on the [main branch](https://pandas.pydata.org/docs/dev/getting_started/install.html#installing-the-development-version-of-pandas) of pandas.
+
+
+### Reproducible Example
+
+```python
+import pandas as pd
+s1 = pd.Series({"a": pd.NA}, dtype="boolean")
+s2 = pd.Series({"a": pd.NA, "b": False}, dtype="boolean")
+s1.all(), s1.any(), s2.all(), s2.any()
+```
+
+### Issue Description
+
+Following #49828, I understand that `or`, `and` and `not` operators might not be correctly implemented for `pd.NA`. This, however, creates some funny behaviour when working with arrays of length 1 vs those of length >1.
+
+The above examples outputs:
+`(np.True_, np.False_, np.False_, np.False_)`
+
+### Expected Behavior
+
+```
+>>> s1.all()
+np.False_
+```
+
+### Installed Versions
+
+<details>
+
+INSTALLED VERSIONS
+------------------
+commit                : ab90747e3dae0e69b1bdbf083820b8075689b34b
+python                : 3.13.13
+python-bits           : 64
+OS                    : Linux
+OS-release            : 6.17.0-20-generic
+Version               : #20~24.04.1-Ubuntu SMP PREEMPT_DYNAMIC Thu Mar 19 01:28:37 UTC 2
+machine               : x86_64
+processor             : x86_64
+byteorder             : little
+LC_ALL                : None
+LANG                  : en_GB.UTF-8
+LOCALE                : en_GB.UTF-8
+
+pandas                : 3.0.2
+numpy                 : 2.4.4
+dateutil              : 2.9.0.post0
+pip                   : 26.0.1
+Cython                : None
+sphinx                : None
+IPython               : 9.5.0
+adbc-driver-postgresql: None
+adbc-driver-sqlite    : None
+bs4                   : 4.13.5
+bottleneck            : None
+fastparquet           : None
+fsspec                : 2025.7.0
+html5lib              : None
+hypothesis            : None
+gcsfs                 : None
+jinja2                : 3.1.6
+lxml.etree            : None
+matplotlib            : 3.10.6
+numba                 : 0.65.0
+numexpr               : 2.11.0
+odfpy                 : None
+openpyxl              : None
+psycopg2              : None
+pymysql               : None
+pyarrow               : 21.0.0
+pyiceberg             : None
+pyreadstat            : None
+pytest                : 8.4.1
+python-calamine       : None
+pytz                  : None
+pyxlsb                : None
+s3fs                  : None
+scipy                 : 1.16.1
+sqlalchemy            : None
+tables                : 3.10.2
+tabulate              : None
+xarray                : None
+xlrd                  : None
+xlsxwriter            : None
+zstandard             : None
+qtpy                  : None
+pyqt5                 : None
+
+
+</details>
+CI regression: Doc Build and pre-commit jobs failing across multiple PRs
+### Describe the bug
+
+The following CI jobs are failing across multiple unrelated PRs:
+
+- Doc Build and Upload
+- Code Checks / Docstring validation, typing, and other manual pre-commit hooks
+
+Failures appear unrelated to PR contents and occur during environment setup/build.
+
+---
+
+### Evidence
+
+Observed failures on:
+
+- https://github.com/pandas-dev/pandas/pull/65212
+- https://github.com/pandas-dev/pandas/pull/65224
+- https://github.com/pandas-dev/pandas/pull/65225
+
+All show failures in:
+
+- Doc Build and Upload
+- Docstring validation, typing, and other manual pre-commit hooks
+
+---
+
+### Error message
+
+From the Doc Build job:
+
+../../meson.build:2:0: ERROR: Compiler cython cannot compile programs.
+
+This occurs during the Meson sanity check before pandas builds.
+
+---
+
+### Expected behavior
+
+CI jobs should pass for unrelated PRs unless affected by code changes.
+
+---
+
+### Additional context
+
+Since the same checks are failing across multiple unrelated PRs,
+this appears to be a CI environment regression rather than a
+PR-specific issue.

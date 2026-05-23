@@ -21,6 +21,7 @@ def test_redact_payload_handles_nested_fields():
     payload = {
         "authorization": "Bearer abcdef",
         "nested": {"password": "hello", "notes": "token=abc"},
+        "storage": {"minio_access_key": "minioadmin", "minio_secret_key": "supersecret"},
         "items": ["sk-1234567890abcdef", {"secret": "keep out"}],
     }
 
@@ -29,6 +30,8 @@ def test_redact_payload_handles_nested_fields():
     assert redacted["authorization"] == "[REDACTED]"
     assert redacted["nested"]["password"] == "[REDACTED]"
     assert redacted["nested"]["notes"] == "token=[REDACTED]"
+    assert redacted["storage"]["minio_access_key"] == "[REDACTED]"
+    assert redacted["storage"]["minio_secret_key"] == "[REDACTED]"
     assert redacted["items"][0] == "[REDACTED]"
     assert redacted["items"][1]["secret"] == "[REDACTED]"
 

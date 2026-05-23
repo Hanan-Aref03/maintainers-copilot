@@ -7,6 +7,7 @@ import os
 
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 
 
 APP_TITLE = "Maintainer's Copilot"
@@ -18,11 +19,16 @@ APP_SUBTITLE = (
 API_URL = os.getenv("API_URL", "http://localhost:8010").rstrip("/")
 MODEL_SERVER_URL = os.getenv("MODEL_SERVER_URL", "http://localhost:8011").rstrip("/")
 VAULT_ADDR = os.getenv("VAULT_ADDR", "http://localhost:8200").rstrip("/")
+MINIO_BUCKET = os.getenv("MINIO_BUCKET", "copilot-attachments")
+MINIO_MODEL_BUCKET = os.getenv("MINIO_MODEL_BUCKET", "copilot-model-artifacts")
+MINIO_EVAL_BUCKET = os.getenv("MINIO_EVAL_BUCKET", "copilot-eval-artifacts")
+MINIO_SNAPSHOT_BUCKET = os.getenv("MINIO_SNAPSHOT_BUCKET", "copilot-conversation-snapshots")
 
 DEFAULT_THREAD_ID = "demo-thread"
 DEFAULT_WIDGET_PUBLIC_ID = "demo123"
-DEFAULT_WIDGET_GREETING = "Hi! How can I help with issue triage?"
+DEFAULT_WIDGET_GREETING = "How can I help?"
 DEFAULT_WIDGET_ORIGINS = "http://localhost:3000"
+HOST_DEMO_URL = "http://localhost:3000"
 
 MEMORY_TYPES = ("semantic", "episodic", "procedural")
 CHAT_PROMPTS = [
@@ -63,6 +69,31 @@ def api_request(
             headers=headers,
             json=json_payload,
             params=params,
+            timeout=timeout,
+        )
+    except requests.RequestException as exc:
+        return _response_from_error(url, exc)
+
+
+def api_upload_request(
+    path: str,
+    *,
+    data: dict[str, Any] | None = None,
+    files: dict[str, Any] | None = None,
+    timeout: int = 120,
+) -> requests.Response:
+    headers = {}
+    token = st.session_state.get("auth_token")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    url = f"{API_URL}{path}"
+    try:
+        return requests.post(
+            url,
+            headers=headers,
+            data=data,
+            files=files,
             timeout=timeout,
         )
     except requests.RequestException as exc:
@@ -138,6 +169,15 @@ def text_preview(text: str, limit: int = 120) -> str:
     return sanitized[: limit - 1].rstrip() + "..."
 
 
+def format_bytes(value: int | float) -> str:
+    size = float(value or 0)
+    units = ["B", "KB", "MB", "GB", "TB"]
+    for unit in units:
+        if size < 1024 or unit == units[-1]:
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+
+
 def service_probe(url: str) -> dict[str, Any]:
     try:
         response = requests.get(url, timeout=5)
@@ -173,6 +213,12 @@ def summarize_api_health(payload: Any) -> str:
         parts.append(f"Gemini {'ready' if payload.get('gemini_ready') else 'off'}")
     if "voyage_ready" in payload:
         parts.append(f"Voyage {'ready' if payload.get('voyage_ready') else 'off'}")
+    storage_buckets = payload.get("storage_buckets_ready")
+    if isinstance(storage_buckets, dict) and storage_buckets:
+        ready = sum(1 for value in storage_buckets.values() if value)
+        parts.append(f"Storage {ready}/{len(storage_buckets)} ready")
+    elif "minio_ready" in payload:
+        parts.append(f"Storage {'ready' if payload.get('minio_ready') else 'off'}")
     return " | ".join(parts) if parts else "Ready"
 
 
@@ -183,6 +229,8 @@ def summarize_model_health(payload: Any) -> str:
     parts = []
     if "fine_tuned_ready" in payload:
         parts.append(f"Fine-tuned {'ready' if payload.get('fine_tuned_ready') else 'off'}")
+    if "model_artifacts_ready" in payload:
+        parts.append(f"Artifacts {'ready' if payload.get('model_artifacts_ready') else 'off'}")
     if "gemini_ready" in payload:
         parts.append(f"Gemini {'ready' if payload.get('gemini_ready') else 'off'}")
     if "gemini_model" in payload:
@@ -416,6 +464,21 @@ def render_status_card(label: str, value: str, detail: str, tone: str = "neutral
     )
 
 
+def render_widget_preview(public_id: str) -> None:
+    preview_url = f"{HOST_DEMO_URL}/?widget_id={public_id}"
+    st.markdown(
+        """
+        <div class="mc-callout">
+            <strong>Live host preview</strong>
+            The widget below runs inside the demo host page, so you can see the floating assistant in a real app shell.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.caption("The frame uses the same public widget bundle that the host page serves in production.")
+    components.iframe(preview_url, height=980, scrolling=False)
+
+
 def render_hero(healths: dict[str, dict[str, Any]]) -> None:
     user = current_user()
     session_value = f"{user['email']}" if user else "Visitor mode"
@@ -572,6 +635,7 @@ def submit_chat_message(thread_id: str, prompt: str) -> None:
                 "meta": {
                     "provider": payload.get("llm_provider") or "local",
                     "usedFallback": bool(payload.get("used_fallback")),
+                    "fallbackReason": payload.get("fallback_reason"),
                     "retrievedDocIds": payload.get("retrieved_doc_ids") or [],
                 },
             }
@@ -634,6 +698,8 @@ def render_chat_tab() -> None:
                         f"Provider: {provider}",
                         "Fallback" if meta.get("usedFallback") else "Primary path",
                     ]
+                    if meta.get("fallbackReason"):
+                        chips.append(f"Reason: {meta.get('fallbackReason')}")
                     retrieved = meta.get("retrievedDocIds") or []
                     chips.append(
                         f"{len(retrieved)} source{'s' if len(retrieved) != 1 else ''}"
@@ -838,7 +904,7 @@ def render_widgets_tab() -> None:
 
     with right:
         st.markdown("#### Preview and embed")
-        st.caption("Copy the script tag into a host page that is allowed by the widget's origin list.")
+        st.caption("Copy the script tag, or use the live host preview below.")
 
         if not widgets:
             st.info("No widgets yet. Create one on the left to generate an embed snippet.")
@@ -885,6 +951,9 @@ def render_widgets_tab() -> None:
             if origins:
                 st.caption(f"Allowed origins: {', '.join(origins)}")
 
+            st.write("")
+            render_widget_preview(selected_public_id)
+
         if widgets:
             st.write("")
             st.markdown("#### All widgets")
@@ -898,6 +967,116 @@ def render_widgets_tab() -> None:
                 for widget in widgets
             ]
             st.dataframe(summary_rows, use_container_width=True, hide_index=True)
+
+
+def render_attachments_tab() -> None:
+    user = current_user()
+    if not user:
+        st.info("Sign in to upload or browse attachments.")
+        return
+
+    attachments_response = api_request("GET", "/attachments/")
+    if attachments_response.ok:
+        attachments = parse_response(attachments_response)
+    else:
+        st.error(parse_response(attachments_response).get("detail") or "Could not load attachments")
+        attachments = []
+
+    total_size = sum(int(attachment.get("size_bytes") or 0) for attachment in attachments)
+    attachment_metrics = st.columns(4)
+    attachment_metric_data = [
+        ("Files", str(len(attachments)), "Objects stored in MinIO", "ok"),
+        ("Total size", format_bytes(total_size), "Combined stored bytes", "neutral"),
+        ("Bucket", MINIO_BUCKET, "Target MinIO bucket", "neutral"),
+        ("Role", str(user.get("role") or "unknown"), "Current session privileges", "neutral"),
+    ]
+    for column, card in zip(attachment_metrics, attachment_metric_data):
+        with column:
+            render_status_card(*card)
+
+    st.write("")
+    left, right = st.columns([1, 1.2], gap="large")
+
+    with left:
+        st.markdown("#### Upload file")
+        st.caption("Files are stored in MinIO and indexed in Postgres with owner metadata.")
+        with st.form("attachment_form", clear_on_submit=True):
+            upload = st.file_uploader("Attachment", key="attachment_upload")
+            notes = st.text_area(
+                "Context note",
+                key="attachment_notes",
+                placeholder="Optional note for your future self or the next maintainer...",
+                height=120,
+            )
+            submitted = st.form_submit_button("Store file", use_container_width=True)
+
+        if submitted:
+            if upload is None:
+                st.warning("Choose a file before uploading.")
+            else:
+                with st.spinner("Uploading attachment..."):
+                    response = api_upload_request(
+                        "/attachments/",
+                        data={"notes": notes},
+                        files={
+                            "file": (
+                                upload.name,
+                                upload.getvalue(),
+                                upload.type or "application/octet-stream",
+                            )
+                        },
+                    )
+                if response.ok:
+                    st.success("Attachment stored.")
+                    st.rerun()
+                else:
+                    st.error(parse_response(response).get("detail") or "Attachment upload failed")
+
+    with right:
+        st.markdown("#### Stored files")
+        st.caption("Download files back through the API or inspect their MinIO metadata below.")
+
+        if not attachments:
+            st.info("No attachments yet. Upload a file to populate the MinIO bucket.")
+            return
+
+        summary_rows = [
+            {
+                "Filename": attachment.get("filename"),
+                "Size": format_bytes(int(attachment.get("size_bytes") or 0)),
+                "Bucket": attachment.get("bucket_name"),
+                "Notes": text_preview(attachment.get("notes") or "", 64) if attachment.get("notes") else "",
+            }
+            for attachment in attachments
+        ]
+        st.dataframe(summary_rows, use_container_width=True, hide_index=True)
+
+        for attachment in attachments[:8]:
+            attachment_id = attachment.get("id")
+            with st.expander(f"{attachment.get('filename', 'attachment')} | {format_bytes(int(attachment.get('size_bytes') or 0))}", expanded=False):
+                render_chip_row(
+                    [
+                        f"Bucket: {attachment.get('bucket_name')}",
+                        f"Type: {attachment.get('content_type') or 'application/octet-stream'}",
+                        f"Uploaded: {attachment.get('created_at') or 'unknown'}",
+                    ],
+                    muted=True,
+                )
+                if attachment.get("notes"):
+                    st.write(attachment.get("notes"))
+                st.caption(f"SHA256: {attachment.get('sha256')}")
+                download_response = api_request("GET", f"/attachments/{attachment_id}/download")
+                if download_response.ok:
+                    st.download_button(
+                        "Download file",
+                        data=download_response.content,
+                        file_name=str(attachment.get("filename") or "attachment"),
+                        mime=str(attachment.get("content_type") or "application/octet-stream"),
+                        key=f"download_{attachment_id}",
+                        use_container_width=True,
+                    )
+                else:
+                    st.error(parse_response(download_response).get("detail") or "Download failed")
 
 
 def render_tools_tab() -> None:
@@ -1053,7 +1232,15 @@ def render_sidebar(healths: dict[str, dict[str, Any]]) -> None:
         language="powershell",
     )
     st.sidebar.code("cd widget; npm install; npm run dev", language="powershell")
-    st.sidebar.caption("Use the widget dev server when you want to iterate on the floating chat bubble.")
+    st.sidebar.caption(
+        "Use the widget dev server for UI work and the host demo at http://localhost:3000 for the embedded preview."
+    )
+    st.sidebar.markdown("### Storage")
+    st.sidebar.caption("MinIO console: http://localhost:9001")
+    st.sidebar.caption(f"Bucket: {MINIO_BUCKET}")
+    st.sidebar.caption(f"Model artifacts: {MINIO_MODEL_BUCKET}")
+    st.sidebar.caption(f"Eval reports: {MINIO_EVAL_BUCKET}")
+    st.sidebar.caption(f"Snapshots: {MINIO_SNAPSHOT_BUCKET}")
 
     st.sidebar.markdown("### Health")
     st.sidebar.metric("API", "Healthy" if healths["api"]["ok"] else "Unavailable")
@@ -1114,8 +1301,8 @@ def main() -> None:
         render_auth()
         return
 
-    chat_tab, memory_tab, widgets_tab, tools_tab = st.tabs(
-        ["Chat", "Memory", "Widgets", "Tools"]
+    chat_tab, memory_tab, widgets_tab, attachments_tab, tools_tab = st.tabs(
+        ["Chat", "Memory", "Widgets", "Attachments", "Tools"]
     )
     with chat_tab:
         render_chat_tab()
@@ -1123,6 +1310,8 @@ def main() -> None:
         render_memory_tab()
     with widgets_tab:
         render_widgets_tab()
+    with attachments_tab:
+        render_attachments_tab()
     with tools_tab:
         render_tools_tab()
 

@@ -1,0 +1,67 @@
+{
+  "best_global_step": 3,
+  "best_metric": 0.1111111111111111,
+  "best_model_checkpoint": "C:\\Users\\USER\\maintainers-copilot\\model_server\\models\\fine_tuned\\distilbert_pandas_issues\\checkpoints\\checkpoint-3",
+  "epoch": 3.0,
+  "eval_steps": 500,
+  "global_step": 9,
+  "is_hyper_param_search": false,
+  "is_local_process_zero": true,
+  "is_world_process_zero": true,
+  "log_history": [
+    {
+      "epoch": 1.0,
+      "eval_accuracy": 0.2857142857142857,
+      "eval_loss": 1.5973252058029175,
+      "eval_macro_f1": 0.1111111111111111,
+      "eval_runtime": 0.0637,
+      "eval_samples_per_second": 109.968,
+      "eval_steps_per_second": 15.71,
+      "eval_weighted_f1": 0.12698412698412698,
+      "step": 3
+    },
+    {
+      "epoch": 2.0,
+      "eval_accuracy": 0.2857142857142857,
+      "eval_loss": 1.5947551727294922,
+      "eval_macro_f1": 0.1111111111111111,
+      "eval_runtime": 0.0518,
+      "eval_samples_per_second": 135.077,
+      "eval_steps_per_second": 19.297,
+      "eval_weighted_f1": 0.12698412698412698,
+      "step": 6
+    },
+    {
+      "epoch": 3.0,
+      "eval_accuracy": 0.2857142857142857,
+      "eval_loss": 1.5937002897262573,
+      "eval_macro_f1": 0.1111111111111111,
+      "eval_runtime": 0.0861,
+      "eval_samples_per_second": 81.345,
+      "eval_steps_per_second": 11.621,
+      "eval_weighted_f1": 0.12698412698412698,
+      "step": 9
+    }
+  ],
+  "logging_steps": 25,
+  "max_steps": 9,
+  "num_input_tokens_seen": 0,
+  "num_train_epochs": 3,
+  "save_steps": 500,
+  "stateful_callbacks": {
+    "TrainerControl": {
+      "args": {
+        "should_epoch_stop": false,
+        "should_evaluate": false,
+        "should_log": false,
+        "should_save": true,
+        "should_training_stop": true
+      },
+      "attributes": {}
+    }
+  },
+  "total_flos": 52458181632.0,
+  "train_batch_size": 8,
+  "trial_name": null,
+  "trial_params": null
+}

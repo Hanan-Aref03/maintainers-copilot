@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import logging
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,6 +15,10 @@ try:  # pragma: no cover - optional at import time in minimal environments
     import joblib
 except Exception:  # pragma: no cover - graceful fallback
     joblib = None
+
+from app.services.model_artifact_service import ModelArtifactService
+
+logger = logging.getLogger(__name__)
 
 
 def _safe_json_loads(text: str) -> Any | None:
@@ -242,6 +247,16 @@ class FineTunedClassifier:
             "validation_metrics": val_metrics,
         }
         self.model_card_path.write_text(json.dumps(model_card, indent=2), encoding="utf-8")
+
+        try:
+            ModelArtifactService().store_classifier_run(
+                training_hash=training_hash,
+                model_card=model_card,
+                model_path=self.model_path,
+            )
+        except Exception as exc:  # pragma: no cover - best-effort artifact mirroring
+            logger.warning("Failed to mirror classifier artifacts to MinIO: %s", exc)
+
         return final_pipeline
 
     def predict(self, title: str, body: str) -> str:

@@ -15,6 +15,8 @@ Maintainer's Copilot is an authenticated assistant for open-source maintainers. 
 - a separate model server for classification, entity extraction, and summarization
 - a React widget that can be embedded on a host page
 - a Streamlit operator console for demos and internal administration
+- MinIO-backed file attachments for sharing blobs with metadata stored in Postgres
+- separate MinIO buckets for model artifacts, eval reports, and conversation snapshots
 - Postgres, Redis, Minio, Vault, and Jaeger for storage, cache, secret management, and tracing
 
 The goal is to give maintainers a single place to:
@@ -53,7 +55,7 @@ Data / Infra
     |-- Postgres for users, widgets, long-term memory, audit logs
     |-- Redis for short-term conversation memory
     |-- Vault for secrets
-    |-- Minio for object storage
+    |-- Minio for attachments, model artifacts, eval reports, and chat snapshots
     |-- Jaeger / OTLP for traces
 ```
 
@@ -107,7 +109,18 @@ The main folders and their responsibilities are:
 3. JWTs carry token-version state so sessions can be invalidated later.
 4. Role checks gate admin-only widget operations.
 
-### 4.4 Model Tool Flow
+### 4.4 Attachment Flow
+
+1. A signed-in user opens the Attachments tab in Streamlit or calls `POST /attachments/` directly.
+2. The API reads the multipart file upload, computes a SHA-256 checksum, and validates the size limit.
+3. The file bytes are written to MinIO under a user-scoped object key.
+4. Postgres stores the attachment metadata, including owner, bucket, object key, MIME type, filename, size, checksum, and optional notes.
+5. `GET /attachments/` returns the user-owned metadata rows plus a download URL.
+6. `GET /attachments/{id}/download` re-checks ownership and streams the object back through the API.
+
+This keeps the blob payload out of Postgres while still making the file easy to list, audit, and download.
+
+### 4.5 Model Tool Flow
 
 The Streamlit tools tab talks directly to the model server:
 
@@ -125,6 +138,8 @@ The database schema is intentionally small and opinionated:
   - identity, email, password hash, role, token version, timestamps
 - `widgets`
   - public widget IDs, owner IDs, theme, greeting, allowed origins, enabled tools
+- `attachments`
+  - attachment ownership, MinIO bucket/object key, filename, size, checksum, notes, timestamps
 - `long_term_memory`
   - memory entries, memory type, text content, optional embedding, metadata JSON
 - `audit_logs`
@@ -135,6 +150,7 @@ The database schema is intentionally small and opinionated:
 The relationships are straightforward:
 
 - `widgets.owner_id -> users.id`
+- `attachments.owner_id -> users.id`
 - `long_term_memory.user_id -> users.id`
 - `audit_logs.actor_id -> users.id`
 
@@ -270,7 +286,63 @@ The pipeline is also defensive:
 - if the reranker model is not present locally, it skips reranking instead of failing
 - trace spans are emitted around rewrite, retrieve, and rerank stages
 
-### 6.7 Model Server
+### 6.7 Attachment Storage
+
+File attachments are intentionally split into two parts:
+
+- MinIO stores the binary blob
+- Postgres stores the metadata and ownership record
+
+The upload path is implemented by `app/api/routes_attachments.py`, `app/services/attachment_service.py`, and `app/infra/blob_store.py`.
+
+The upload flow works like this:
+
+1. The API receives a multipart upload from Streamlit or any authenticated client.
+2. The service validates the file size and normalizes the filename.
+3. The service computes a SHA-256 checksum for later verification and dedup/debugging.
+4. The blob store client uploads the object to MinIO using an S3-compatible signed request.
+5. The repository creates the `attachments` row in Postgres.
+6. The API returns metadata plus a download URL.
+
+The download path is symmetrical:
+
+1. The API confirms the caller owns the attachment row.
+2. The service fetches the blob from MinIO.
+3. The route streams the file back with `Content-Disposition: attachment`.
+
+Why this design works well for the project:
+
+- large blobs do not bloat Postgres
+- attachment metadata remains queryable
+- ownership checks stay in the API layer
+- uploads and downloads can be traced and redacted like any other request
+
+### 6.8 Artifact Buckets
+
+MinIO is used as a structured artifact store, not a generic dumping ground.
+
+The buckets are intentionally separated by concern:
+
+- `copilot-attachments` for user uploads
+- `copilot-model-artifacts` for classifier binaries, manifests, and training summaries
+- `copilot-eval-artifacts` for CI eval reports and run manifests
+- `copilot-conversation-snapshots` for recent retrieved-chunk snapshots
+
+Each family has its own writer:
+
+- `app/services/attachment_service.py`
+- `app/services/model_artifact_service.py`
+- `app/services/eval_artifact_service.py`
+- `app/services/conversation_snapshot_service.py`
+
+This keeps the code and the data easy to reason about:
+
+- different retention rules can be applied per bucket
+- the operator console can explain each artifact family separately
+- CI outputs do not get mixed with runtime chat data
+- model artifacts stay distinct from user-uploaded files
+
+### 6.9 Model Server
 
 `model_server/app/main.py` exposes the AI endpoints used by the rest of the system.
 
@@ -293,7 +365,7 @@ The key design point is that every classification path returns metadata. That me
 - the Gemini-backed classifier wrappers
 - the entity extractor and summarizer implementations
 
-### 6.8 Widget Runtime
+### 6.10 Widget Runtime
 
 The widget is a separate React bundle in `widget/`.
 
@@ -315,7 +387,7 @@ The API also enforces:
 
 That keeps the public embed surface from turning into an open relay.
 
-### 6.9 Streamlit Console
+### 6.11 Streamlit Console
 
 `chatbot_streamlit/app.py` is the internal admin surface.
 
@@ -340,7 +412,7 @@ The UI also probes:
 
 That gives immediate visibility into whether the stack is healthy before a demo starts.
 
-### 6.10 Security Model
+### 6.12 Security Model
 
 The security model is layered:
 
@@ -372,6 +444,8 @@ Here is what happens when a maintainer uses the widget:
 10. The UI shows the response plus metadata about provider/fallback and retrieved sources.
 
 That same pattern applies in Streamlit, except the admin console exposes more controls and more diagnostics.
+
+The Attachments tab follows a similar operator flow: the blob goes to MinIO, the metadata goes to Postgres, and the API handles authenticated downloads back to the browser.
 
 ## 8. Why The Project Is Structured This Way
 
