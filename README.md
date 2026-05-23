@@ -2,15 +2,6 @@
 
 Authenticated assistant for open-source maintainers with issue classification, entity extraction, RAG over docs plus resolved issues, embeddable widget support, and demo/admin tooling.
 
-## Project Docs
-
-- [Architecture](docs/ARCH.md)
-- [Code Explainer](docs/CODE_EXPLAINER.md)
-- [Decisions](docs/DECISIONS.md)
-- [Runbook](docs/RUNBOOK.md)
-- [Evaluations](docs/EVALS.md)
-- [Security](docs/SECURITY.md)
-
 ## What Is Included
 
 - FastAPI backend with layered `api -> service -> repository -> domain` structure
@@ -23,6 +14,7 @@ Authenticated assistant for open-source maintainers with issue classification, e
 - React widget bundle served from the API and host demo
 - Deterministic evaluation scripts and golden sets
 - DistilBERT fine-tuning notebook for `pandas-dev/pandas` issues
+- Local docs live in `docs/` and are ignored from GitHub so they stay workspace-only.
 
 ## Quick Start
 
